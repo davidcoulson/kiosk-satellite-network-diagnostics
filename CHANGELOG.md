@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Local IP address, from the same root-free `ip route get` call (its `src` field).
+- Rolling p95 latency and a 5-minute miss count for both the gateway and configured target ping, alongside the existing latest-burst reading — matches ha-paneld's own "healthy; p95 5 ms, no misses in the last 5 min" runtime-diagnostics framing.
+
 ## 0.2.0
 
 - Connection type (WiFi/Ethernet/other), from `ip route get`'s default-route interface — no root.

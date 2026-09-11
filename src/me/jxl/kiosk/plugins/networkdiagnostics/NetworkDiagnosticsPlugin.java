@@ -47,10 +47,14 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
     private volatile Boolean networkUp;
     private volatile String connectionType; // "wifi" | "ethernet" | "other:<iface>" | null
     private volatile String gatewayIp;
+    private volatile String localIp;
     private volatile NetworkMath.WifiSnapshot wifi;
     private volatile PathBurst targetBurst;
     private volatile PathBurst gatewayBurst;
     private volatile DashboardProbe.Result dashboardResult;
+    // Rolling p95/miss-rate history, one tracker per pinged target — see LatencyTracker.
+    private final LatencyTracker gatewayLatency = new LatencyTracker();
+    private final LatencyTracker targetLatency = new LatencyTracker();
 
     // Outage episode tracking (in-memory only — see class doc).
     private Long openEpisodeStartMs;
@@ -140,12 +144,14 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         if (simulation()) {
             connectionType = "wifi";
             gatewayIp = "192.0.2.1";
+            localIp = "192.0.2.42";
             return;
         }
         String out = RootShell.runOutput("ip route get 1.1.1.1 2>/dev/null", RootShell.DETECT_TIMEOUT_MS);
         NetworkMath.RouteInfo route = NetworkMath.parseIpRouteGet(out);
         connectionType = NetworkMath.classifyInterface(route.iface);
         gatewayIp = route.gatewayIp;
+        localIp = route.localIp;
     }
 
     private boolean simulation() {
@@ -200,10 +206,16 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
 
     private void runProbeCycle() {
         String target = str(settings.get("pingTarget"));
-        if (!target.isEmpty()) targetBurst = pingHost(target);
+        if (!target.isEmpty()) {
+            targetBurst = pingHost(target);
+            targetLatency.record(targetBurst);
+        }
 
         String gateway = gatewayIp;
-        if (gateway != null) gatewayBurst = pingHost(gateway);
+        if (gateway != null) {
+            gatewayBurst = pingHost(gateway);
+            gatewayLatency.record(gatewayBurst);
+        }
 
         String dashboardUrl = str(settings.get("dashboardUrl"));
         if (!dashboardUrl.isEmpty()) {
@@ -231,11 +243,23 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         return v == null ? "" : String.valueOf(v).trim();
     }
 
-    private static String describeBurst(String label, PathBurst burst) {
+    /** [tracker] adds a rolling p95 + miss-in-window count alongside the
+     *  latest burst — ha-paneld's own "healthy; p95 5 ms, no misses in the
+     *  last 5 min" framing, since a single burst's RTT is noisy but p95
+     *  over recent history is stable enough to alert on. */
+    private static String describeBurst(String label, PathBurst burst, LatencyTracker tracker) {
         if (burst == null) return label + ": unavailable";
         if (burst.received == 0) return label + ": unreachable (" + (int) burst.lossPercent() + "% loss)";
         String loss = burst.lossPercent() > 0 ? ", " + (int) burst.lossPercent() + "% loss" : "";
-        return label + ": " + Math.round(burst.avgRttMs()) + " ms" + loss;
+        StringBuilder s = new StringBuilder(label).append(": ").append(Math.round(burst.avgRttMs())).append(" ms").append(loss);
+        if (tracker.hasSamples()) {
+            s.append(" · p95 ").append(Math.round(tracker.p95Ms())).append(" ms");
+        }
+        int misses = tracker.missesInWindow();
+        s.append(misses > 0
+            ? " · " + misses + " miss" + (misses == 1 ? "" : "es") + " in the last 5 min"
+            : " · no misses in the last 5 min");
+        return s.toString();
     }
 
     private void reportStatus() {
@@ -259,9 +283,10 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
                 + (wifi.rssiDbm != null ? " " + wifi.rssiDbm + " dBm" : "");
             parts.add("WiFi: " + detail);
         }
-        if (gatewayIp != null) parts.add(describeBurst("Gateway (" + gatewayIp + ")", gatewayBurst));
+        if (localIp != null) parts.add("Local IP: " + localIp);
+        if (gatewayIp != null) parts.add(describeBurst("Gateway (" + gatewayIp + ")", gatewayBurst, gatewayLatency));
         String target = str(settings.get("pingTarget"));
-        if (!target.isEmpty()) parts.add(describeBurst("Ping " + target, targetBurst));
+        if (!target.isEmpty()) parts.add(describeBurst("Ping " + target, targetBurst, targetLatency));
         String dashboardUrl = str(settings.get("dashboardUrl"));
         if (!dashboardUrl.isEmpty()) {
             DashboardProbe.Result d = dashboardResult;

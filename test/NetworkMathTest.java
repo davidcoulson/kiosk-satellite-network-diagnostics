@@ -87,24 +87,29 @@ public final class NetworkMathTest {
         Class<?> routeClass = Class.forName("me.jxl.kiosk.plugins.networkdiagnostics.NetworkMath$RouteInfo");
         Field gwField = routeClass.getDeclaredField("gatewayIp"); gwField.setAccessible(true);
         Field ifaceField = routeClass.getDeclaredField("iface"); ifaceField.setAccessible(true);
+        Field localIpField = routeClass.getDeclaredField("localIp"); localIpField.setAccessible(true);
 
         // Real `ip route get 8.8.8.8` captures: Ethernet (10.2.4.129) and WiFi (10.2.4.109),
         // both 2026-09-11, both reachable without root.
         Object ethernetRoute = parseRoute.invoke(null, "8.8.8.8 via 10.2.4.1 dev eth0 table 1009 src 10.2.4.129 uid 2000 \n    cache ");
         assertEquals("10.2.4.1", gwField.get(ethernetRoute), "gateway parsed from the Ethernet capture");
         assertEquals("eth0", ifaceField.get(ethernetRoute), "interface parsed from the Ethernet capture");
+        assertEquals("10.2.4.129", localIpField.get(ethernetRoute), "this panel's own src address parsed from the Ethernet capture");
 
         Object wifiRoute = parseRoute.invoke(null, "8.8.8.8 via 10.2.4.1 dev wlan0  table wlan0  src 10.2.4.109 uid 2000 \n    cache");
         assertEquals("10.2.4.1", gwField.get(wifiRoute), "gateway parsed from the WiFi capture");
         assertEquals("wlan0", ifaceField.get(wifiRoute), "interface parsed from the WiFi capture");
+        assertEquals("10.2.4.109", localIpField.get(wifiRoute), "this panel's own src address parsed from the WiFi capture");
 
         Object directRoute = parseRoute.invoke(null, "192.168.1.5 dev eth0 src 192.168.1.10");
         assertNull(gwField.get(directRoute), "a direct (same-subnet) route has no gateway");
         assertEquals("eth0", ifaceField.get(directRoute), "the interface is still found without a gateway clause");
+        assertEquals("192.168.1.10", localIpField.get(directRoute), "src is still found on a direct route with no gateway");
 
         Object emptyRoute = parseRoute.invoke(null, (Object) null);
         assertNull(gwField.get(emptyRoute), "null input yields no gateway");
         assertNull(ifaceField.get(emptyRoute), "null input yields no interface");
+        assertNull(localIpField.get(emptyRoute), "null input yields no local IP");
 
         Method classify = math.getDeclaredMethod("classifyInterface", String.class);
         classify.setAccessible(true);
@@ -131,7 +136,18 @@ public final class NetworkMathTest {
         assertFalse((Boolean) matches.invoke(null, echoRequest, echoRequest.length, false, 7, 0x1234), "an unmodified request (still type 8) is not a reply");
         assertFalse((Boolean) matches.invoke(null, new byte[]{0, 0}, 2, false, 7, 0x1234), "a too-short datagram is never a match");
 
-        System.out.println("PASS: SSID/BSSID/RSSI normalization, dumpsys wifi parsing, ip route parsing, interface classification, outage merge-window logic, ICMP wire format.");
+        Method percentile = math.getDeclaredMethod("percentile", java.util.List.class, double.class);
+        percentile.setAccessible(true);
+        java.util.List<Double> ascending = java.util.Arrays.asList(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0);
+        assertEquals(10.0, (double) percentile.invoke(null, ascending, 95.0), "p95 of 10 ascending samples is the top one (nearest-rank)");
+        assertEquals(1.0, (double) percentile.invoke(null, ascending, 0.0), "p0 is the smallest sample");
+        assertEquals(10.0, (double) percentile.invoke(null, ascending, 100.0), "p100 is the largest sample");
+        assertEquals(5.0, (double) percentile.invoke(null, ascending, 50.0), "p50 (median) of 10 ascending samples");
+        java.util.List<Double> unsorted = java.util.Arrays.asList(30.0, 10.0, 20.0);
+        assertEquals(30.0, (double) percentile.invoke(null, unsorted, 100.0), "unsorted input is sorted before ranking");
+        assertEquals(-1.0, (double) percentile.invoke(null, java.util.Collections.emptyList(), 95.0), "no samples yields -1, not a bogus 0");
+
+        System.out.println("PASS: SSID/BSSID/RSSI normalization, dumpsys wifi parsing, ip route + local IP parsing, interface classification, outage merge-window logic, latency percentile, ICMP wire format.");
     }
 
     private static void assertTrue(boolean condition, String message) {

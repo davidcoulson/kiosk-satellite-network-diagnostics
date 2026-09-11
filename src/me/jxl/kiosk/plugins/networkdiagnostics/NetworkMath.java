@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package me.jxl.kiosk.plugins.networkdiagnostics;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -115,24 +118,29 @@ final class NetworkMath {
     static final class RouteInfo {
         final String gatewayIp; // null for a direct route (no gateway) or unparseable output
         final String iface;     // null only when even the interface can't be found
-        RouteInfo(String gatewayIp, String iface) {
+        final String localIp;   // this panel's own source address for the route, or null
+        RouteInfo(String gatewayIp, String iface, String localIp) {
             this.gatewayIp = gatewayIp;
             this.iface = iface;
+            this.localIp = localIp;
         }
     }
 
     private static final Pattern ROUTE_VIA_DEV = Pattern.compile("\\bvia\\s+(\\S+)\\s+dev\\s+(\\S+)");
     private static final Pattern ROUTE_DEV_ONLY = Pattern.compile("\\bdev\\s+(\\S+)");
+    private static final Pattern ROUTE_SRC = Pattern.compile("\\bsrc\\s+(\\S+)");
 
     /** Parses `ip route get <probe>` output — real captured shape:
      *  `8.8.8.8 via 10.2.4.1 dev eth0 table 1009 src 10.2.4.129 uid 2000`
-     *  (a direct/same-subnet route omits the `via` gateway clause). */
+     *  (a direct/same-subnet route omits the `via` gateway clause; `src`
+     *  is this panel's own address the kernel would send from). */
     static RouteInfo parseIpRouteGet(String raw) {
-        if (raw == null || raw.isEmpty()) return new RouteInfo(null, null);
+        if (raw == null || raw.isEmpty()) return new RouteInfo(null, null, null);
+        String localIp = firstGroup(ROUTE_SRC, raw);
         Matcher withGateway = ROUTE_VIA_DEV.matcher(raw);
-        if (withGateway.find()) return new RouteInfo(withGateway.group(1), withGateway.group(2));
+        if (withGateway.find()) return new RouteInfo(withGateway.group(1), withGateway.group(2), localIp);
         Matcher devOnly = ROUTE_DEV_ONLY.matcher(raw);
-        return new RouteInfo(null, devOnly.find() ? devOnly.group(1) : null);
+        return new RouteInfo(null, devOnly.find() ? devOnly.group(1) : null, localIp);
     }
 
     /** "wifi", "ethernet", or "other:<name>" for anything else (a VPN
@@ -167,5 +175,27 @@ final class NetworkMath {
      *  against, so it can never be a merge. */
     static boolean isMergedRecovery(Long msSinceLastRecovery) {
         return msSinceLastRecovery != null && msSinceLastRecovery >= 0 && msSinceLastRecovery <= MERGE_WINDOW_MS;
+    }
+
+    // --- Latency percentile — ha-paneld's own runtime diagnostics reports round-trip
+    // latency as a p95 over a rolling window ("healthy; p95 5 ms, no misses in the last
+    // 5 min"), not just the latest sample: a single burst's RTT is noisy, but p95 over
+    // recent history is a stable enough number to alert on.
+
+    /**
+     * The [p]th percentile (0..100) of [samples], nearest-rank method — the
+     * smallest value at or above which at least [p]% of samples fall.
+     * [samples] need not be sorted; this copies and sorts rather than
+     * mutating the caller's list. Empty input returns -1 (no data, not a
+     * bogus 0). [p] is clamped to 0..100 defensively.
+     */
+    static double percentile(List<Double> samples, double p) {
+        if (samples.isEmpty()) return -1.0;
+        List<Double> sorted = new ArrayList<>(samples);
+        Collections.sort(sorted);
+        double clamped = Math.max(0.0, Math.min(100.0, p));
+        int rank = (int) Math.ceil(clamped / 100.0 * sorted.size());
+        int index = Math.max(0, Math.min(sorted.size() - 1, rank - 1));
+        return sorted.get(index);
     }
 }

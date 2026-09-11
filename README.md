@@ -23,11 +23,12 @@ The plugin declares two actions — **Ping now** (an immediate probe cycle outsi
 | Signal | Mechanism | Root? |
 | --- | --- | --- |
 | Connection type (WiFi/Ethernet/other) | `ip route get`, classified by the default route's interface name | No |
+| Local IP address | The same `ip route get` call's `src` field | No |
 | Network up/down | Subscribes to Kiosk Satellite's own `device.network` event | No |
 | Outage history | Counts recovered outages in the last 24h from that same event, with a 10-second merge window so a flapping connection isn't counted as dozens of separate outages | No |
 | WiFi SSID, BSSID, signal (RSSI) | `dumpsys wifi`, parsed for the connected network | Yes |
-| Gateway latency + loss | An unprivileged ICMP echo (ping) socket to the default gateway found via `ip route get` | No |
-| Target latency + loss | The same ICMP mechanism, against your configured **Ping target** | No |
+| Gateway latency + loss, rolling p95, 5-min miss count | An unprivileged ICMP echo (ping) socket to the default gateway found via `ip route get` | No |
+| Target latency + loss, rolling p95, 5-min miss count | The same ICMP mechanism, against your configured **Ping target** | No |
 | Dashboard responsiveness | A plain HTTP GET to your configured **Dashboard URL**, timed to first response headers | No |
 
 ## Why the ping probe needs no root
@@ -45,6 +46,10 @@ Reading the currently-connected SSID and signal strength normally goes through `
 ## Dashboard URL: a stand-in, not a real page-load timer
 
 Kiosk Satellite's own configured dashboard/Home Assistant URL isn't something this plugin can discover — the SDK's read commands don't expose it. The **Dashboard URL** setting is a URL you provide, and what's measured is time to receive HTTP response headers on a plain GET, not full page render, JavaScript execution, or a WebSocket handshake completing (see the [chart-rendering SDK gap](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/1), filed while scoping a real WebView-responsiveness feature for a different plugin, for what a genuine dashboard-jank measurement would actually need). It's a rough network+server reachability signal, not a UX metric.
+
+## p95 latency and miss tracking
+
+A single ping burst's round-trip time is noisy — one slow reading doesn't mean much on its own. Each pinged target (the gateway, and your configured **Ping target**) keeps a rolling window of its last 60 bursts and reports the 95th-percentile RTT alongside the latest reading, plus how many of the last 5 minutes' bursts came back with zero replies ("misses"). This mirrors ha-paneld's own runtime-diagnostics framing (`healthy; p95 5 ms, no misses in the last 5 min`) — a stable number to alert on, rather than reacting to every noisy individual sample. In-memory only, same as the outage tracker below: resets on plugin restart.
 
 ## Outage tracking is simplified from the reference implementation
 
