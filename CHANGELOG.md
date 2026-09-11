@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.09.11.01
+
+- Switch to date-based versioning (`YYYY.MM.DD.NN`), matching this author's other projects.
+- Metadata only otherwise: author field and AI-assisted note in the README.
+
 ## 0.3.0
 
 - Local IP address, from the same root-free `ip route get` call (its `src` field).
