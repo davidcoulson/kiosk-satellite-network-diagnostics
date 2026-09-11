@@ -23,6 +23,9 @@ final class LatencyTracker {
     static final long MISS_WINDOW_MS = 5 * 60_000L;
 
     private final Deque<Double> rttSamplesMs = new ArrayDeque<>();
+    // Paired 1:1 with rttSamplesMs, pushed and evicted together — for the
+    // compact latency chart this plugin publishes; see historySnapshot().
+    private final Deque<Long> rttAtMs = new ArrayDeque<>();
     private final Deque<Long> missAtMs = new ArrayDeque<>();
 
     /** Records one probe outcome. A null or fully-lost burst counts as a
@@ -36,7 +39,24 @@ final class LatencyTracker {
             return;
         }
         rttSamplesMs.addLast(burst.avgRttMs());
+        rttAtMs.addLast(System.currentTimeMillis());
         while (rttSamplesMs.size() > MAX_SAMPLES) rttSamplesMs.removeFirst();
+        while (rttAtMs.size() > MAX_SAMPLES) rttAtMs.removeFirst();
+    }
+
+    /** Defensive-copy snapshot of the retained RTT history, paired with the
+     *  wall-clock time each sample was taken — for a compact chart. */
+    static final class HistorySnapshot {
+        final List<Long> timestampsMs;
+        final List<Double> rttMs;
+        HistorySnapshot(List<Long> timestampsMs, List<Double> rttMs) {
+            this.timestampsMs = timestampsMs;
+            this.rttMs = rttMs;
+        }
+    }
+
+    HistorySnapshot historySnapshot() {
+        return new HistorySnapshot(new ArrayList<>(rttAtMs), new ArrayList<>(rttSamplesMs));
     }
 
     /** The 95th percentile RTT (ms) over retained history, or -1 with no

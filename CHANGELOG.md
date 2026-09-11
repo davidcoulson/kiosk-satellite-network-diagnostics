@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0
+
+- Publish a compact latency-history chart for the gateway and, when configured, the ping target — separate charts (not one shared chart with two series), since the two histories can have different lengths and start times. Up to 60 retained RTT samples each (30 minutes at the default 30s probe interval).
+- Filed [an upstream feature request](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/4) for a read command exposing Kiosk Satellite's own configured dashboard URL (and current view), so the **Dashboard URL** setting could eventually be auto-populated instead of typed in by hand. Deliberately scoped to the URL only, no auth token — this plugin only times plain HTTP response headers and never needs to authenticate.
+
 ## 0.4.0
 
 - Publish every applicable reading as a real Home Assistant entity (binary_sensor, sensor, text_sensor), alongside the existing status text — network up, connection type, WiFi signal/SSID, gateway and target latency/loss/p95, dashboard response time, and 24h outage count. Declares the `entities` capability. Entities appear and disappear as readings become applicable or not (e.g. clearing the ping target removes its entities). Resolves the upstream SDK gap this plugin used to document as a limitation, now shipped in jxlarrea/kiosk-satellite's "Add SDK 1 plugin sensors, selects and bar charts".

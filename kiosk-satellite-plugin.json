@@ -3,10 +3,10 @@
   "apiVersion": 1,
   "id": "network-diagnostics",
   "name": "Network Diagnostics",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "minAndroidSdk": 24,
   "entryClass": "me.jxl.kiosk.plugins.networkdiagnostics.NetworkDiagnosticsPlugin",
-  "description": "Connection type (WiFi/Ethernet), WiFi signal, network outage history, gateway/target ping, and dashboard HTTP latency — as both status text and Home Assistant sensor entities. Only the detailed WiFi SSID/BSSID/RSSI needs root — everything else needs none.",
+  "description": "Connection type (WiFi/Ethernet), WiFi signal, network outage history, gateway/target ping (with latency history charts), and dashboard HTTP latency — as status text, Home Assistant sensor entities, and compact charts. Only the detailed WiFi SSID/BSSID/RSSI needs root — everything else needs none.",
   "author": "David Coulson",
   "license": "Apache-2.0",
   "capabilities": [

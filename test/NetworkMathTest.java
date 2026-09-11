@@ -147,7 +147,29 @@ public final class NetworkMathTest {
         assertEquals(30.0, (double) percentile.invoke(null, unsorted, 100.0), "unsorted input is sorted before ranking");
         assertEquals(-1.0, (double) percentile.invoke(null, java.util.Collections.emptyList(), 95.0), "no samples yields -1, not a bogus 0");
 
-        System.out.println("PASS: SSID/BSSID/RSSI normalization, dumpsys wifi parsing, ip route + local IP parsing, interface classification, outage merge-window logic, latency percentile, ICMP wire format.");
+        Method latencyChart = math.getDeclaredMethod("latencyChart", String.class, java.util.List.class, java.util.List.class);
+        latencyChart.setAccessible(true);
+        assertNull(latencyChart.invoke(null, "Gateway latency", java.util.Collections.emptyList(), java.util.Collections.emptyList()),
+            "no history yet — nothing to chart");
+        assertNull(latencyChart.invoke(null, "Gateway latency", java.util.Collections.singletonList(1000L), java.util.Collections.singletonList(12.0)),
+            "a single point isn't chartable — the host requires strictly increasing timestamps and it's not useful anyway");
+        java.util.List<Long> times = java.util.Arrays.asList(1000L, 31000L, 61000L);
+        java.util.List<Double> rtts = java.util.Arrays.asList(12.0, 15.0, 11.0);
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> chart = (java.util.Map<String, Object>) latencyChart.invoke(null, "Gateway latency", times, rtts);
+        assertNotNull(chart, "three points produce a chart");
+        assertEquals("Gateway latency", chart.get("title"), "chart title");
+        assertEquals("ms", chart.get("unit"), "chart unit");
+        assertEquals("line", chart.get("type"), "chart type");
+        assertEquals(true, chart.get("compact"), "compact sparkline, not a full chart");
+        assertEquals(times, chart.get("timestamps"), "timestamps pass through unchanged");
+        @SuppressWarnings("unchecked")
+        java.util.List<java.util.Map<String, Object>> series = (java.util.List<java.util.Map<String, Object>>) chart.get("series");
+        assertEquals(1, series.size(), "one series");
+        assertEquals("Gateway latency", series.get(0).get("name"), "series name matches the chart title");
+        assertEquals(rtts, series.get(0).get("values"), "series values pass through unchanged");
+
+        System.out.println("PASS: SSID/BSSID/RSSI normalization, dumpsys wifi parsing, ip route + local IP parsing, interface classification, outage merge-window logic, latency percentile, latency chart payload building, ICMP wire format.");
     }
 
     private static void assertTrue(boolean condition, String message) {
@@ -166,6 +188,10 @@ public final class NetworkMathTest {
 
     private static void assertNull(Object actual, String message) {
         if (actual != null) throw new AssertionError(message + " — expected null but got " + actual);
+    }
+
+    private static void assertNotNull(Object actual, String message) {
+        if (actual == null) throw new AssertionError(message + " — expected non-null");
     }
 
     private static boolean objectsEquals(Object a, Object b) {

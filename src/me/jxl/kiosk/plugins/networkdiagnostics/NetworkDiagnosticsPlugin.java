@@ -307,6 +307,25 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         }
         host.status(String.join(" · ", parts), false);
         publishEntities();
+        publishCharts();
+    }
+
+    /** Publishes a compact latency-history chart per target — gateway and
+     *  the configured ping target each get their own chart (see
+     *  NetworkMath.latencyChart's class doc for why not one shared chart)
+     *  — removing either one once it has fewer than two retained samples
+     *  (e.g. right after the plugin restarts, or a target was just
+     *  configured and hasn't answered twice yet). */
+    private void publishCharts() {
+        LatencyTracker.HistorySnapshot gw = gatewayLatency.historySnapshot();
+        Map<String, Object> gwChart = NetworkMath.latencyChart("Gateway latency", gw.timestampsMs, gw.rttMs);
+        if (gwChart != null) host.publishSeries("gateway_latency", gwChart);
+        else host.removeSeries("gateway_latency");
+
+        LatencyTracker.HistorySnapshot tgt = targetLatency.historySnapshot();
+        Map<String, Object> tgtChart = NetworkMath.latencyChart("Ping latency", tgt.timestampsMs, tgt.rttMs);
+        if (tgtChart != null) host.publishSeries("target_latency", tgtChart);
+        else host.removeSeries("target_latency");
     }
 
     /** Computes the desired entity set via the pure {@link NetworkEntities},

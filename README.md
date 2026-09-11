@@ -48,7 +48,11 @@ Every reading above publishes as an entity the moment it's applicable, and is re
 | Dashboard response time | sensor (ms) | **Dashboard URL** is set and the last probe succeeded |
 | Outages (24h) | sensor (count) | Always |
 
-Up to 12 entities, well under SDK 1's 32-entity-per-plugin cap. Values update on the same cadence as status text (the probe interval, or immediately on a `device.network` transition) — this is a snapshot of "right now," not a Home Assistant-side history graph; see p95/miss tracking above for the stability signal that's already built in.
+Up to 12 entities, well under SDK 1's 32-entity-per-plugin cap. Values update on the same cadence as status text (the probe interval, or immediately on a `device.network` transition) — each entity is a snapshot of "right now," not a history; see p95/miss tracking above for the built-in stability signal, and Latency history charts below for an actual graph.
+
+## Latency history charts
+
+Alongside the entities, the gateway and your configured **Ping target** each get their own compact line chart of retained RTT history (up to 60 samples — 30 minutes at the default 30-second probe interval), visible in both the on-device plugin subpage and Remote Admin. Two separate charts, not one shared chart with two series: the gateway and target histories can have different lengths and start times (a ping target configured after the plugin's already been running for a while, for instance), and a chart's series all have to share one timestamps array. Not published until a target has at least two retained samples.
 
 ## Why the ping probe needs no root
 
@@ -64,7 +68,9 @@ Reading the currently-connected SSID and signal strength normally goes through `
 
 ## Dashboard URL: a stand-in, not a real page-load timer
 
-Kiosk Satellite's own configured dashboard/Home Assistant URL isn't something this plugin can discover — the SDK's read commands don't expose it. The **Dashboard URL** setting is a URL you provide, and what's measured is time to receive HTTP response headers on a plain GET, not full page render, JavaScript execution, or a WebSocket handshake completing (see the [chart-rendering SDK gap](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/1), filed while scoping a real WebView-responsiveness feature for a different plugin, for what a genuine dashboard-jank measurement would actually need). It's a rough network+server reachability signal, not a UX metric.
+Kiosk Satellite's own configured dashboard/Home Assistant URL isn't something this plugin can discover — the SDK's read commands (`getStats`/`getUptime`) don't expose it, so the **Dashboard URL** setting asks you to provide one by hand. Filed as [an upstream feature request](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/4) for a read command exposing the configured URL (and ideally the current view) — deliberately scoped to the URL only, no auth token, since this plugin only ever times plain HTTP response headers and never needs to authenticate or read real dashboard content.
+
+What's measured today is time to receive HTTP response headers on a plain GET, not full page render, JavaScript execution, or a WebSocket handshake completing (see the [chart-rendering SDK gap](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/1), filed while scoping a real WebView-responsiveness feature for a different plugin, for what a genuine dashboard-jank measurement would actually need). It's a rough network+server reachability signal, not a UX metric.
 
 ## p95 latency and miss tracking
 
@@ -83,7 +89,7 @@ python3 tools/test.py
 python3 tools/build.py
 ```
 
-`tools/test.py` compiles the whole source tree against `android.jar` (needed at compile time for the `android.system.Os` ICMP socket calls, even though the test itself never invokes them) and runs device-free logic tests: SSID/BSSID/RSSI normalization, `dumpsys wifi` parsing, `ip route get` parsing and interface classification (all verified against real captures from physical panels, not just synthetic fixtures), the outage merge-window boundary, the ICMP wire format's request/reply matching, and which entities `NetworkEntities.compute` produces (and omits) for a fully-populated, a minimal/unconfigured, and a currently-unreachable reading. `tools/build.py` produces the ZIP, checksum and manifest in `dist/`.
+`tools/test.py` compiles the whole source tree against `android.jar` (needed at compile time for the `android.system.Os` ICMP socket calls, even though the test itself never invokes them) and runs device-free logic tests: SSID/BSSID/RSSI normalization, `dumpsys wifi` parsing, `ip route get` parsing and interface classification (all verified against real captures from physical panels, not just synthetic fixtures), the outage merge-window boundary, the ICMP wire format's request/reply matching, the latency-chart payload building, and which entities `NetworkEntities.compute` produces (and omits) for a fully-populated, a minimal/unconfigured, and a currently-unreachable reading. `tools/build.py` produces the ZIP, checksum and manifest in `dist/`.
 
 ## Publishing and handoff
 

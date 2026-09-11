@@ -3,7 +3,9 @@ package me.jxl.kiosk.plugins.networkdiagnostics;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -197,5 +199,31 @@ final class NetworkMath {
         int rank = (int) Math.ceil(clamped / 100.0 * sorted.size());
         int index = Math.max(0, Math.min(sorted.size() - 1, rank - 1));
         return sorted.get(index);
+    }
+
+    /**
+     * Builds the {@code publishSeries} payload for one target's retained
+     * RTT history — a single-series compact line chart. Null (not
+     * published) with fewer than two samples: the host requires strictly
+     * increasing timestamps, and a one-point chart isn't useful anyway.
+     * Gateway and target each get their own chart (rather than one shared
+     * chart with two series) since their histories can have different
+     * lengths and timestamps — a configured ping target started later
+     * than the gateway, for instance — and a chart's series must all share
+     * one timestamps array.
+     */
+    static Map<String, Object> latencyChart(String title, List<Long> timestampsMs, List<Double> rttMs) {
+        if (timestampsMs.size() < 2) return null;
+        Map<String, Object> series = new HashMap<>();
+        series.put("name", title);
+        series.put("values", new ArrayList<>(rttMs));
+        Map<String, Object> chart = new HashMap<>();
+        chart.put("title", title);
+        chart.put("unit", "ms");
+        chart.put("type", "line");
+        chart.put("compact", true);
+        chart.put("timestamps", new ArrayList<>(timestampsMs));
+        chart.put("series", Collections.singletonList(series));
+        return chart;
     }
 }
