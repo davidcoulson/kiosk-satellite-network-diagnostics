@@ -2,7 +2,7 @@
 
 Connection type, WiFi signal, network outage history, and three latency readings: your configured target, the default gateway, and a dashboard URL's HTTP response time. Most of this plugin needs **no root at all** — only the detailed WiFi SSID/BSSID/RSSI reading does.
 
-Everything here is status text in the plugin subpage today, not real Home Assistant entities — SDK 1 has no sensor/text-sensor entity type to publish into (only RGB lights). See [the upstream feature request](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/2) this plugin is waiting on.
+Every applicable reading is published both as plugin-subpage status text and as a real Home Assistant sensor/text-sensor/binary-sensor entity — SDK 1 added entity types beyond RGB lights in jxlarrea/kiosk-satellite's "Add SDK 1 plugin sensors, selects and bar charts", resolving [the upstream feature request](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/2) this plugin used to be blocked on. See "Home Assistant entities" below for exactly what's exposed and when.
 
 ## Requirements
 
@@ -30,6 +30,25 @@ The plugin declares two actions — **Ping now** (an immediate probe cycle outsi
 | Gateway latency + loss, rolling p95, 5-min miss count | An unprivileged ICMP echo (ping) socket to the default gateway found via `ip route get` | No |
 | Target latency + loss, rolling p95, 5-min miss count | The same ICMP mechanism, against your configured **Ping target** | No |
 | Dashboard responsiveness | A plain HTTP GET to your configured **Dashboard URL**, timed to first response headers | No |
+
+## Home Assistant entities
+
+Every reading above publishes as an entity the moment it's applicable, and is removed the moment it stops being applicable (e.g. clearing the **Ping target** setting removes the target's latency/loss/p95 entities rather than leaving them stuck on a stale value):
+
+| Entity | Type | When it exists |
+| --- | --- | --- |
+| Network up | binary_sensor (`connectivity`) | Always |
+| Connection type | text_sensor | Always |
+| WiFi signal | sensor (dBm) | On WiFi, rooted |
+| WiFi SSID | sensor (text) | On WiFi, rooted |
+| Gateway latency, packet loss | sensor (ms, %) | A gateway is known and at least one recent echo came back |
+| Gateway p95 latency | sensor (ms) | Once the gateway has rolling history |
+| Ping target latency, packet loss | sensor (ms, %) | **Ping target** is set and at least one recent echo came back |
+| Ping target p95 latency | sensor (ms) | Once the target has rolling history |
+| Dashboard response time | sensor (ms) | **Dashboard URL** is set and the last probe succeeded |
+| Outages (24h) | sensor (count) | Always |
+
+Up to 12 entities, well under SDK 1's 32-entity-per-plugin cap. Values update on the same cadence as status text (the probe interval, or immediately on a `device.network` transition) — this is a snapshot of "right now," not a Home Assistant-side history graph; see p95/miss tracking above for the stability signal that's already built in.
 
 ## Why the ping probe needs no root
 
@@ -64,7 +83,7 @@ python3 tools/test.py
 python3 tools/build.py
 ```
 
-`tools/test.py` compiles the whole source tree against `android.jar` (needed at compile time for the `android.system.Os` ICMP socket calls, even though the test itself never invokes them) and runs device-free logic tests: SSID/BSSID/RSSI normalization, `dumpsys wifi` parsing, `ip route get` parsing and interface classification (all verified against real captures from physical panels, not just synthetic fixtures), the outage merge-window boundary, and the ICMP wire format's request/reply matching. `tools/build.py` produces the ZIP, checksum and manifest in `dist/`.
+`tools/test.py` compiles the whole source tree against `android.jar` (needed at compile time for the `android.system.Os` ICMP socket calls, even though the test itself never invokes them) and runs device-free logic tests: SSID/BSSID/RSSI normalization, `dumpsys wifi` parsing, `ip route get` parsing and interface classification (all verified against real captures from physical panels, not just synthetic fixtures), the outage merge-window boundary, the ICMP wire format's request/reply matching, and which entities `NetworkEntities.compute` produces (and omits) for a fully-populated, a minimal/unconfigured, and a currently-unreachable reading. `tools/build.py` produces the ZIP, checksum and manifest in `dist/`.
 
 ## Publishing and handoff
 

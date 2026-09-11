@@ -17,10 +17,12 @@ import me.jxl.kiosk.plugins.PluginHost;
  * own `ping` binary uses), and a configured dashboard URL's HTTP response
  * time (root-free — plain {@code HttpURLConnection}).
  *
- * Everything here is status text, not real Home Assistant entities: SDK
- * 1's {@code entities} capability only covers RGB lights (see this
- * plugin's README and the upstream feature request it links) — there is
- * no sensor/text-sensor entity type to publish this into today.
+ * Also publishes SDK 1 sensor/text-sensor/binary-sensor entities (see
+ * NetworkEntities) for every reading that's currently applicable — the
+ * upstream feature request this plugin's README used to link is resolved
+ * as of jxlarrea/kiosk-satellite's "Add SDK 1 plugin sensors, selects and
+ * bar charts". Status text stays as a compact, always-present summary
+ * alongside the entities.
  *
  * Outage tracking is a simplified port of ha-paneld's WifiOutageTracker:
  * same merge-window and attention-threshold constants (see NetworkMath),
@@ -61,6 +63,11 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
     private Long lastRecoveryAtMs;
     private final Deque<Long> episodeStartsMs = new ArrayDeque<>();
     private static final int MAX_RETAINED_EPISODES = 200;
+
+    // Entity ids ("type.key") this plugin last actually published, so a
+    // reading that becomes inapplicable (e.g. a cleared ping target) gets
+    // removed instead of left behind as permanently "unknown" in HA.
+    private final Set<String> publishedEntityIds = new HashSet<>();
 
     public void start(PluginHost host, Map<String, Object> settings) {
         this.host = host;
@@ -299,6 +306,58 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
             }
         }
         host.status(String.join(" · ", parts), false);
+        publishEntities();
+    }
+
+    /** Computes the desired entity set via the pure {@link NetworkEntities},
+     *  publishes each, then removes whatever this plugin published last
+     *  time but no longer wants (a feature just became inapplicable). */
+    private void publishEntities() {
+        NetworkMath.WifiSnapshot w = wifi;
+        PathBurst gateway = gatewayBurst;
+        PathBurst target = targetBurst;
+        DashboardProbe.Result dashboard = dashboardResult;
+        List<NetworkEntities.Entity> desired = NetworkEntities.compute(
+            networkUp, connectionType,
+            w == null ? null : w.ssid, w == null ? null : w.rssiDbm,
+            gatewayIp,
+            gateway == null || gateway.received == 0 ? null : gateway.avgRttMs(),
+            gateway == null || gateway.received == 0 ? null : gateway.lossPercent(),
+            gatewayLatency.hasSamples() ? gatewayLatency.p95Ms() : null,
+            str(settings.get("pingTarget")),
+            target == null || target.received == 0 ? null : target.avgRttMs(),
+            target == null || target.received == 0 ? null : target.lossPercent(),
+            targetLatency.hasSamples() ? targetLatency.p95Ms() : null,
+            str(settings.get("dashboardUrl")), dashboard != null && dashboard.ok,
+            dashboard == null ? null : dashboard.elapsedMs,
+            outagesLast24h());
+
+        Set<String> desiredIds = new HashSet<>();
+        for (NetworkEntities.Entity e : desired) {
+            desiredIds.add(e.id());
+            switch (e.type) {
+                case "binary_sensor":
+                    host.publishBinarySensor(e.key, e.name, String.valueOf(e.metadata.getOrDefault("deviceClass", "")), (Boolean) e.state);
+                    break;
+                case "text_sensor":
+                    host.publishTextSensor(e.key, e.name, (String) e.state);
+                    break;
+                default:
+                    host.publishSensor(e.key, e.name, e.metadata, (Double) e.state);
+                    break;
+            }
+        }
+        for (String stale : publishedEntityIds) {
+            if (desiredIds.contains(stale)) continue;
+            int dot = stale.indexOf('.');
+            String type = stale.substring(0, dot);
+            String key = stale.substring(dot + 1);
+            if ("binary_sensor".equals(type)) host.removeBinarySensor(key);
+            else if ("text_sensor".equals(type)) host.removeTextSensor(key);
+            else host.removeSensor(key);
+        }
+        publishedEntityIds.clear();
+        publishedEntityIds.addAll(desiredIds);
     }
 
     private interface Task { void run() throws Exception; }

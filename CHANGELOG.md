@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- Publish every applicable reading as a real Home Assistant entity (binary_sensor, sensor, text_sensor), alongside the existing status text — network up, connection type, WiFi signal/SSID, gateway and target latency/loss/p95, dashboard response time, and 24h outage count. Declares the `entities` capability. Entities appear and disappear as readings become applicable or not (e.g. clearing the ping target removes its entities). Resolves the upstream SDK gap this plugin used to document as a limitation, now shipped in jxlarrea/kiosk-satellite's "Add SDK 1 plugin sensors, selects and bar charts".
+
 ## 0.3.1-20260911
 
 - Correction: an earlier attempt at this release used a 4-component date-based version (`2026.09.11.01`), which Kiosk Satellite's plugin manifest validator rejects (`FormatException: Invalid plugin ID or version`) — it requires 3-component semver, optionally with a `-suffix`. That broken release has been removed; this one embeds the date as a semver prerelease suffix instead.

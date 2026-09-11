@@ -35,5 +35,6 @@ with tempfile.TemporaryDirectory(prefix='network-diagnostics-test-') as director
         check=True,
     )
     subprocess.run([tool('java'), '-ea', '-cp', directory, 'NetworkMathTest'], check=True)
+    subprocess.run([tool('java'), '-ea', '-cp', directory, 'NetworkEntitiesTest'], check=True)
 
 subprocess.run([sys.executable, str(root / 'tools/test_android_sdk.py')], check=True)
