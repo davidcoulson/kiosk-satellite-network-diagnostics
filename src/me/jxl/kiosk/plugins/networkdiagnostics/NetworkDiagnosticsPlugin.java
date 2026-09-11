@@ -9,10 +9,18 @@ import me.jxl.kiosk.plugins.KioskPlugin;
 import me.jxl.kiosk.plugins.PluginHost;
 
 /**
- * WiFi signal (root, `dumpsys wifi`), network outage history (root-free —
- * driven by the host's own {@code device.network} event), and layer-3
- * latency/loss probing (root-free — an unprivileged ICMP socket, the same
- * mechanism Android's own `ping` binary uses).
+ * Connection type (WiFi/Ethernet, root-free via `ip route get`), WiFi
+ * signal (root, `dumpsys wifi`), network outage history (root-free —
+ * driven by the host's own {@code device.network} event), and three
+ * latency readings: a configured ping target, the default gateway (both
+ * root-free — an unprivileged ICMP socket, the same mechanism Android's
+ * own `ping` binary uses), and a configured dashboard URL's HTTP response
+ * time (root-free — plain {@code HttpURLConnection}).
+ *
+ * Everything here is status text, not real Home Assistant entities: SDK
+ * 1's {@code entities} capability only covers RGB lights (see this
+ * plugin's README and the upstream feature request it links) — there is
+ * no sensor/text-sensor entity type to publish this into today.
  *
  * Outage tracking is a simplified port of ha-paneld's WifiOutageTracker:
  * same merge-window and attention-threshold constants (see NetworkMath),
@@ -33,12 +41,16 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
 
     private volatile boolean rooted;
     private Boolean lastSimulation;
-    private ScheduledFuture<?> pingTask;
+    private ScheduledFuture<?> probeTask;
 
     // Latest observations, for status reporting.
     private volatile Boolean networkUp;
+    private volatile String connectionType; // "wifi" | "ethernet" | "other:<iface>" | null
+    private volatile String gatewayIp;
     private volatile NetworkMath.WifiSnapshot wifi;
-    private volatile PathBurst lastBurst;
+    private volatile PathBurst targetBurst;
+    private volatile PathBurst gatewayBurst;
+    private volatile DashboardProbe.Result dashboardResult;
 
     // Outage episode tracking (in-memory only — see class doc).
     private Long openEpisodeStartMs;
@@ -75,7 +87,7 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
             settings = copy;
             lastSimulation = simulation;
             if (recheck) detect();
-            reschedulePing();
+            rescheduleProbes();
             reportStatus();
         });
     }
@@ -84,7 +96,7 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         submit(() -> {
             switch (command) {
                 case "pingNow":
-                    runPing();
+                    runProbeCycle();
                     break;
                 case "detect":
                     detect();
@@ -104,18 +116,36 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         submit(() -> {
             networkUp = up;
             recordTransition(up);
+            // The interface/gateway may have changed (e.g. WiFi to
+            // Ethernet failover) — this is exactly the moment to recheck.
+            detectRoute();
             reportStatus();
         });
     }
 
     private void detect() {
         rooted = simulation() || RootShell.isRooted();
+        detectRoute();
         if (rooted && !simulation()) {
             String out = RootShell.runOutput("dumpsys wifi 2>/dev/null", RootShell.DETECT_TIMEOUT_MS);
             wifi = NetworkMath.parseDumpsysWifi(out);
         } else if (simulation()) {
-            wifi = new NetworkMath.WifiSnapshot("Simulated-WiFi", -55);
+            wifi = new NetworkMath.WifiSnapshot("Simulated-WiFi", "aa:bb:cc:dd:ee:ff", -55);
         }
+    }
+
+    /** Connection type and default gateway — root-free (confirmed on real
+     *  hardware: an unprivileged shell can run `ip route get`). */
+    private void detectRoute() {
+        if (simulation()) {
+            connectionType = "wifi";
+            gatewayIp = "192.0.2.1";
+            return;
+        }
+        String out = RootShell.runOutput("ip route get 1.1.1.1 2>/dev/null", RootShell.DETECT_TIMEOUT_MS);
+        NetworkMath.RouteInfo route = NetworkMath.parseIpRouteGet(out);
+        connectionType = NetworkMath.classifyInterface(route.iface);
+        gatewayIp = route.gatewayIp;
     }
 
     private boolean simulation() {
@@ -152,46 +182,67 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         return count;
     }
 
-    private void reschedulePing() {
-        if (pingTask != null) {
-            pingTask.cancel(false);
-            pingTask = null;
+    /** One shared timer drives all three latency readings — the target
+     *  ping, the gateway ping, and the dashboard HTTP check — so they
+     *  stay on one predictable cadence instead of three independent
+     *  timers drifting apart. Always scheduled (unlike the old
+     *  target-only ping): gateway ping runs whenever a gateway is known,
+     *  regardless of whether a target or dashboard URL is configured. */
+    private void rescheduleProbes() {
+        if (probeTask != null) {
+            probeTask.cancel(false);
+            probeTask = null;
         }
-        String target = str(settings.get("pingTarget"));
-        if (target.isEmpty()) return;
         long intervalS = ((Number) settings.getOrDefault("pingIntervalSeconds", 30)).longValue();
-        pingTask = worker.scheduleWithFixedDelay(
-            () -> submit(this::runPing), 0, Math.max(10, intervalS), TimeUnit.SECONDS);
+        probeTask = worker.scheduleWithFixedDelay(
+            () -> submit(this::runProbeCycle), 0, Math.max(10, intervalS), TimeUnit.SECONDS);
     }
 
-    private void runPing() {
+    private void runProbeCycle() {
         String target = str(settings.get("pingTarget"));
-        if (target.isEmpty()) return;
-        if (simulation()) {
-            lastBurst = new PathBurst(System.currentTimeMillis(), PING_ECHOES, PING_ECHOES,
-                Arrays.asList(12L, 14L, 11L, 13L));
-            reportStatus();
-            return;
+        if (!target.isEmpty()) targetBurst = pingHost(target);
+
+        String gateway = gatewayIp;
+        if (gateway != null) gatewayBurst = pingHost(gateway);
+
+        String dashboardUrl = str(settings.get("dashboardUrl"));
+        if (!dashboardUrl.isEmpty()) {
+            dashboardResult = simulation()
+                ? DashboardProbe.Result.success(45L, 200)
+                : DashboardProbe.probe(dashboardUrl);
         }
-        InetAddress address;
-        try {
-            address = InetAddress.getByName(target);
-        } catch (Exception e) {
-            host.status("Ping target \"" + target + "\" could not be resolved.", true);
-            return;
-        }
-        PathBurst burst = icmpSource.burst(address, PING_ECHOES, PING_ECHO_TIMEOUT_MS, System::currentTimeMillis);
-        lastBurst = burst;
         reportStatus();
+    }
+
+    private PathBurst pingHost(String hostOrIp) {
+        if (simulation()) {
+            return new PathBurst(System.currentTimeMillis(), PING_ECHOES, PING_ECHOES,
+                Arrays.asList(12L, 14L, 11L, 13L));
+        }
+        try {
+            InetAddress address = InetAddress.getByName(hostOrIp);
+            return icmpSource.burst(address, PING_ECHOES, PING_ECHO_TIMEOUT_MS, System::currentTimeMillis);
+        } catch (Exception e) {
+            return null; // unresolvable host — reported the same as "unsupported platform"
+        }
     }
 
     private static String str(Object v) {
         return v == null ? "" : String.valueOf(v).trim();
     }
 
+    private static String describeBurst(String label, PathBurst burst) {
+        if (burst == null) return label + ": unavailable";
+        if (burst.received == 0) return label + ": unreachable (" + (int) burst.lossPercent() + "% loss)";
+        String loss = burst.lossPercent() > 0 ? ", " + (int) burst.lossPercent() + "% loss" : "";
+        return label + ": " + Math.round(burst.avgRttMs()) + " ms" + loss;
+    }
+
     private void reportStatus() {
         if (!alive.get()) return;
         List<String> parts = new ArrayList<>();
+        String connType = connectionType;
+        parts.add("Connection: " + (connType == null ? "unknown" : connType));
         parts.add("Network: " + (networkUp == null ? "unknown" : (networkUp ? "up" : "down")));
         int outages = outagesLast24h();
         if (outages > 0) {
@@ -200,23 +251,26 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         }
         if (simulation()) {
             parts.add("Simulation mode");
-        } else if (!rooted) {
+        } else if ("wifi".equals(connType) && !rooted) {
             parts.add("WiFi signal needs root");
-        } else if (wifi != null && wifi.ssid != null) {
-            parts.add("WiFi: " + wifi.ssid + (wifi.rssiDbm != null ? " (" + wifi.rssiDbm + " dBm)" : ""));
-        } else if (rooted) {
-            parts.add("WiFi: not connected");
+        } else if ("wifi".equals(connType) && wifi != null && wifi.ssid != null) {
+            String detail = wifi.ssid
+                + (wifi.bssid != null ? " (" + wifi.bssid + ")" : "")
+                + (wifi.rssiDbm != null ? " " + wifi.rssiDbm + " dBm" : "");
+            parts.add("WiFi: " + detail);
         }
-        PathBurst burst = lastBurst;
+        if (gatewayIp != null) parts.add(describeBurst("Gateway (" + gatewayIp + ")", gatewayBurst));
         String target = str(settings.get("pingTarget"));
-        if (!target.isEmpty()) {
-            if (burst == null) {
-                parts.add("Ping " + target + ": pending");
-            } else if (burst.received == 0) {
-                parts.add("Ping " + target + ": unreachable (" + (int) burst.lossPercent() + "% loss)");
+        if (!target.isEmpty()) parts.add(describeBurst("Ping " + target, targetBurst));
+        String dashboardUrl = str(settings.get("dashboardUrl"));
+        if (!dashboardUrl.isEmpty()) {
+            DashboardProbe.Result d = dashboardResult;
+            if (d == null) {
+                parts.add("Dashboard: pending");
+            } else if (!d.ok) {
+                parts.add("Dashboard: unreachable (" + d.error + ")");
             } else {
-                parts.add("Ping " + target + ": " + Math.round(burst.avgRttMs()) + " ms"
-                    + (burst.lossPercent() > 0 ? ", " + (int) burst.lossPercent() + "% loss" : ""));
+                parts.add("Dashboard: " + d.elapsedMs + " ms (HTTP " + d.httpStatus + ")");
             }
         }
         host.status(String.join(" · ", parts), false);
@@ -238,7 +292,7 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
 
     public void stop() throws Exception {
         alive.set(false);
-        if (pingTask != null) pingTask.cancel(false);
+        if (probeTask != null) probeTask.cancel(false);
         worker.shutdownNow();
         worker.awaitTermination(1000, TimeUnit.MILLISECONDS);
         // KS revokes this plugin's host access before calling stop(), so no unsubscribe call here.

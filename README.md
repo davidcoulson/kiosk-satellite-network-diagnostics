@@ -1,29 +1,34 @@
 # Network Diagnostics for Kiosk Satellite
 
-WiFi signal, network outage history, and layer-3 latency/loss probing. Most of this plugin needs **no root at all** — only the WiFi signal reading does.
+Connection type, WiFi signal, network outage history, and three latency readings: your configured target, the default gateway, and a dashboard URL's HTTP response time. Most of this plugin needs **no root at all** — only the detailed WiFi SSID/BSSID/RSSI reading does.
+
+Everything here is status text in the plugin subpage today, not real Home Assistant entities — SDK 1 has no sensor/text-sensor entity type to publish into (only RGB lights). See [the upstream feature request](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/2) this plugin is waiting on.
 
 ## Requirements
 
 - Kiosk Satellite with **plugin SDK 1 support**.
-- Root (e.g. Magisk) for WiFi SSID/RSSI only. Outage tracking and ping probing work without root, and without it enabled at all.
+- Root (e.g. Magisk) for WiFi SSID/BSSID/RSSI only. Everything else — connection type, outage tracking, gateway ping, target ping, dashboard latency — works without root.
 
 ## Install and use
 
 1. Wait for a stable GitHub release and its GitHub Actions build to complete.
 2. Open **Plugin Manager > Add plugin**, paste this repository URL, review the manifest and README and choose **Trust and install**.
 3. Enable **Network Diagnostics** on its entry row and open the subpage.
-4. Optionally set a **Ping target** (your Home Assistant server, router, or any reliable host) to start latency/loss probing. Everything else works with no configuration.
+4. Connection type, WiFi detail (if applicable) and gateway ping work immediately, no configuration needed. Optionally set a **Ping target** and/or **Dashboard URL** for the other two latency readings.
 
-The plugin declares two actions — **Ping now** (an immediate probe outside the regular interval) and **Check root access and capabilities**.
+The plugin declares two actions — **Ping now** (an immediate probe cycle outside the regular interval) and **Check root access and capabilities**.
 
 ## What it reports
 
 | Signal | Mechanism | Root? |
 | --- | --- | --- |
+| Connection type (WiFi/Ethernet/other) | `ip route get`, classified by the default route's interface name | No |
 | Network up/down | Subscribes to Kiosk Satellite's own `device.network` event | No |
 | Outage history | Counts recovered outages in the last 24h from that same event, with a 10-second merge window so a flapping connection isn't counted as dozens of separate outages | No |
-| WiFi SSID + signal (RSSI) | `dumpsys wifi`, parsed for the connected network | Yes |
-| Latency + packet loss | An unprivileged ICMP echo (ping) socket to your configured target | No |
+| WiFi SSID, BSSID, signal (RSSI) | `dumpsys wifi`, parsed for the connected network | Yes |
+| Gateway latency + loss | An unprivileged ICMP echo (ping) socket to the default gateway found via `ip route get` | No |
+| Target latency + loss | The same ICMP mechanism, against your configured **Ping target** | No |
+| Dashboard responsiveness | A plain HTTP GET to your configured **Dashboard URL**, timed to first response headers | No |
 
 ## Why the ping probe needs no root
 
@@ -31,7 +36,15 @@ Linux grants unprivileged ICMP datagram sockets to any GID inside `net.ipv4.ping
 
 ## Why WiFi signal is different
 
-Reading the currently-connected SSID and signal strength normally goes through `ConnectivityManager`/`WifiManager`, which need a live Android `Context` — a value this plugin has no way to obtain (`KioskPlugin.start` hands it a `PluginHost`, not a `Context`, and the SDK exposes no equivalent). `dumpsys wifi` is the fallback: reachable only as root (a plain app calling `dumpsys` is refused with a permission denial), but it needs no cooperation from Kiosk Satellite itself and works the same way regardless of Android version or OEM `dumpsys` formatting quirks the regex parsing tolerates.
+Reading the currently-connected SSID and signal strength normally goes through `ConnectivityManager`/`WifiManager`, which need a live Android `Context` — a value this plugin has no way to obtain (`KioskPlugin.start` hands it a `PluginHost`, not a `Context`, and the SDK exposes no equivalent). `dumpsys wifi` is the fallback: reachable only as root (a plain app calling `dumpsys` is refused with a permission denial), but it needs no cooperation from Kiosk Satellite itself and works the same way regardless of Android version or OEM `dumpsys` formatting quirks the regex parsing tolerates. SSID, BSSID and RSSI are all parsed from the same `dumpsys` line atomically, verified against a real 14,000-line capture from a physical panel — pulling them from separate matches risked a BSSID from one saved-network row getting attributed to an unrelated SSID from another.
+
+## Connection type and gateway need no root at all
+
+`ip route get <probe-ip>` — confirmed directly on real hardware, both Ethernet and WiFi panels — runs as a plain, unprivileged shell command and reports both the default route's outbound interface (`wlan0`/`eth0`/anything else, classified honestly rather than guessed at) and its gateway. This is also where the gateway IP for the gateway-ping reading comes from; no root, no `dumpsys`, no `ConnectivityManager`.
+
+## Dashboard URL: a stand-in, not a real page-load timer
+
+Kiosk Satellite's own configured dashboard/Home Assistant URL isn't something this plugin can discover — the SDK's read commands don't expose it. The **Dashboard URL** setting is a URL you provide, and what's measured is time to receive HTTP response headers on a plain GET, not full page render, JavaScript execution, or a WebSocket handshake completing (see the [chart-rendering SDK gap](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/1), filed while scoping a real WebView-responsiveness feature for a different plugin, for what a genuine dashboard-jank measurement would actually need). It's a rough network+server reachability signal, not a UX metric.
 
 ## Outage tracking is simplified from the reference implementation
 
@@ -46,7 +59,7 @@ python3 tools/test.py
 python3 tools/build.py
 ```
 
-`tools/test.py` compiles the whole source tree against `android.jar` (needed at compile time for the `android.system.Os` ICMP socket calls, even though the test itself never invokes them) and runs device-free logic tests: SSID/RSSI normalization, `dumpsys wifi` parsing (verified against a real 14,000-line capture from a physical panel, not just synthetic fixtures), the outage merge-window boundary, and the ICMP wire format's request/reply matching. `tools/build.py` produces the ZIP, checksum and manifest in `dist/`.
+`tools/test.py` compiles the whole source tree against `android.jar` (needed at compile time for the `android.system.Os` ICMP socket calls, even though the test itself never invokes them) and runs device-free logic tests: SSID/BSSID/RSSI normalization, `dumpsys wifi` parsing, `ip route get` parsing and interface classification (all verified against real captures from physical panels, not just synthetic fixtures), the outage merge-window boundary, and the ICMP wire format's request/reply matching. `tools/build.py` produces the ZIP, checksum and manifest in `dist/`.
 
 ## Publishing and handoff
 
