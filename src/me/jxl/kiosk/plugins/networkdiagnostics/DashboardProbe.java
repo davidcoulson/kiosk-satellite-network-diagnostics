@@ -5,20 +5,21 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 
 /**
- * How long a plain HTTP(S) GET to a configured URL takes to receive
- * response headers — a rough stand-in for "how responsive is the
- * dashboard right now" when the actual dashboard URL isn't something
- * this plugin can discover on its own (the SDK exposes no read command
- * for Kiosk Satellite's configured Home Assistant/dashboard URL, so the
- * user supplies one as a setting instead — see the manifest).
+ * How long a plain HTTP(S) GET takes to receive response headers — a
+ * rough stand-in for "how responsive is the dashboard right now". The
+ * URL comes from the host's {@code getDashboardState} read command
+ * (added upstream in "Expose sanitized dashboard state to SDK 1
+ * plugins"), falling back to the user's own Dashboard URL setting when
+ * one is configured — see NetworkDiagnosticsPlugin.effectiveDashboardUrl.
+ * Earlier releases could only use the setting, because the SDK had no
+ * way to report what the panel was showing.
  *
  * Deliberately not a real page-load timer: it measures time to receive
  * HTTP response headers, not full page render, script execution, or
- * WebSocket handshake — those would need actual browser/WebView
- * instrumentation this plugin has no access to (see the ported LED
- * plugin's own WebView-graphs SDK gap). The body is never read (the
- * connection is dropped the moment headers arrive) — this only measures
- * network+server responsiveness, not payload size.
+ * WebSocket handshake — those would need instrumentation inside the
+ * WebView's own JS execution, which SDK 1 still doesn't expose. The body
+ * is never read (the connection is dropped the moment headers arrive) —
+ * this only measures network+server responsiveness, not payload size.
  */
 final class DashboardProbe {
     private DashboardProbe() {}
