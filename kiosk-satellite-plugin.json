@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 1,
+  "id": "network-diagnostics",
+  "name": "Network Diagnostics",
+  "version": "0.1.0",
+  "minAndroidSdk": 24,
+  "entryClass": "me.jxl.kiosk.plugins.networkdiagnostics.NetworkDiagnosticsPlugin",
+  "description": "WiFi signal, network outage history, and layer-3 latency probing. WiFi signal needs root (dumpsys wifi); outage tracking and latency probing need no root at all.",
+  "author": "Kiosk Satellite contributors",
+  "license": "Apache-2.0",
+  "capabilities": [
+    "host.read"
+  ],
+  "settings": [
+    {
+      "key": "pingTarget",
+      "type": "string",
+      "title": "Ping target",
+      "description": "Host or IP to measure round-trip latency and packet loss against, e.g. your Home Assistant server or router. Empty disables ping probing. Uses an unprivileged ICMP datagram socket — the same mechanism Android's own ping command uses, no root required.",
+      "default": "",
+      "group": "Latency"
+    },
+    {
+      "key": "pingIntervalSeconds",
+      "type": "number",
+      "title": "Ping interval",
+      "min": 10,
+      "max": 300,
+      "step": 5,
+      "default": 30,
+      "unit": "s",
+      "group": "Latency"
+    },
+    {
+      "key": "simulation",
+      "type": "boolean",
+      "title": "Simulation mode",
+      "description": "Test the controls without touching hardware or the network.",
+      "default": false,
+      "group": "Developer Tools"
+    }
+  ],
+  "commands": [
+    {
+      "id": "pingNow",
+      "title": "Ping now"
+    },
+    {
+      "id": "detect",
+      "title": "Check root access and capabilities"
+    }
+  ]
+}
