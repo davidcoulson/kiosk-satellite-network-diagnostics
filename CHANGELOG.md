@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0
+
+- Discover the dashboard URL automatically via the new `getDashboardState` read command ("Expose sanitized dashboard state to SDK 1 plugins" upstream, resolving [the feature request](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/4) filed for exactly this). The **Dashboard URL** setting is now optional — leave it empty and the plugin times whatever the panel is actually showing, preferring the live `currentUrl` over the configured Home Assistant URL. The setting remains an override for timing a different URL, and a fallback if discovery returns nothing. Status text labels the discovered case as **Dashboard (auto)**.
+
 ## 0.5.0
 
 - Publish a compact latency-history chart for the gateway and, when configured, the ping target — separate charts (not one shared chart with two series), since the two histories can have different lengths and start times. Up to 60 retained RTT samples each (30 minutes at the default 30s probe interval).

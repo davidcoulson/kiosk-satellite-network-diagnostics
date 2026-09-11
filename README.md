@@ -14,7 +14,7 @@ Every applicable reading is published both as plugin-subpage status text and as 
 1. Wait for a stable GitHub release and its GitHub Actions build to complete.
 2. Open **Plugin Manager > Add plugin**, paste this repository URL, review the manifest and README and choose **Trust and install**.
 3. Enable **Network Diagnostics** on its entry row and open the subpage.
-4. Connection type, WiFi detail (if applicable) and gateway ping work immediately, no configuration needed. Optionally set a **Ping target** and/or **Dashboard URL** for the other two latency readings.
+4. Connection type, WiFi detail (if applicable), gateway ping and dashboard latency all work immediately, no configuration needed — the dashboard URL is discovered automatically. Optionally set a **Ping target** for the third latency reading, or a **Dashboard URL** to time something other than the panel's own dashboard.
 
 The plugin declares two actions — **Ping now** (an immediate probe cycle outside the regular interval) and **Check root access and capabilities**.
 
@@ -29,7 +29,7 @@ The plugin declares two actions — **Ping now** (an immediate probe cycle outsi
 | WiFi SSID, BSSID, signal (RSSI) | `dumpsys wifi`, parsed for the connected network | Yes |
 | Gateway latency + loss, rolling p95, 5-min miss count | An unprivileged ICMP echo (ping) socket to the default gateway found via `ip route get` | No |
 | Target latency + loss, rolling p95, 5-min miss count | The same ICMP mechanism, against your configured **Ping target** | No |
-| Dashboard responsiveness | A plain HTTP GET to your configured **Dashboard URL**, timed to first response headers | No |
+| Dashboard responsiveness | A plain HTTP GET to the dashboard the panel is showing (discovered automatically) or your configured **Dashboard URL**, timed to first response headers | No |
 
 ## Home Assistant entities
 
@@ -45,7 +45,7 @@ Every reading above publishes as an entity the moment it's applicable, and is re
 | Gateway p95 latency | sensor (ms) | Once the gateway has rolling history |
 | Ping target latency, packet loss | sensor (ms, %) | **Ping target** is set and at least one recent echo came back |
 | Ping target p95 latency | sensor (ms) | Once the target has rolling history |
-| Dashboard response time | sensor (ms) | **Dashboard URL** is set and the last probe succeeded |
+| Dashboard response time | sensor (ms) | A dashboard URL is known (discovered or configured) and the last probe succeeded |
 | Outages (24h) | sensor (count) | Always |
 
 Up to 12 entities, well under SDK 1's 32-entity-per-plugin cap. Values update on the same cadence as status text (the probe interval, or immediately on a `device.network` transition) — each entity is a snapshot of "right now," not a history; see p95/miss tracking above for the built-in stability signal, and Latency history charts below for an actual graph.
@@ -68,9 +68,11 @@ Reading the currently-connected SSID and signal strength normally goes through `
 
 ## Dashboard URL: a stand-in, not a real page-load timer
 
-Kiosk Satellite's own configured dashboard/Home Assistant URL isn't something this plugin can discover — the SDK's read commands (`getStats`/`getUptime`) don't expose it, so the **Dashboard URL** setting asks you to provide one by hand. Filed as [an upstream feature request](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/4) for a read command exposing the configured URL (and ideally the current view) — deliberately scoped to the URL only, no auth token, since this plugin only ever times plain HTTP response headers and never needs to authenticate or read real dashboard content.
+**No configuration needed as of 0.6.0**: leave **Dashboard URL** empty and the plugin times whatever dashboard the panel is actually showing, via the `getDashboardState` read command upstream added in "Expose sanitized dashboard state to SDK 1 plugins" — resolving [the feature request](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/4) this section used to link. The URL arrives sanitized to scheme/host/port/path (no query string, fragment or credentials), which is all this check ever needed — it never authenticates or reads real dashboard content. The reading is labelled **Dashboard (auto)** in status text when it came from discovery rather than the setting, and the live `currentUrl` is preferred over the configured Home Assistant URL, so what's timed is what's on screen right now.
 
-What's measured today is time to receive HTTP response headers on a plain GET, not full page render, JavaScript execution, or a WebSocket handshake completing (see the [chart-rendering SDK gap](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/1), filed while scoping a real WebView-responsiveness feature for a different plugin, for what a genuine dashboard-jank measurement would actually need). It's a rough network+server reachability signal, not a UX metric.
+The setting stays as an override, for timing a *different* URL than the panel's own (a router, a second Home Assistant instance), and as a fallback if discovery ever returns nothing.
+
+What's measured is time to receive HTTP response headers on a plain GET, not full page render, JavaScript execution, or a WebSocket handshake completing (see the [chart-rendering SDK gap](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/1), filed while scoping a real WebView-responsiveness feature for a different plugin, for what a genuine dashboard-jank measurement would actually need). It's a rough network+server reachability signal, not a UX metric.
 
 ## p95 latency and miss tracking
 

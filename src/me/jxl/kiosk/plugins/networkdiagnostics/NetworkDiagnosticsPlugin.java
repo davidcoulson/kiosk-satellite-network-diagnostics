@@ -69,6 +69,14 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
     // removed instead of left behind as permanently "unknown" in HA.
     private final Set<String> publishedEntityIds = new HashSet<>();
 
+    // Kiosk Satellite's own dashboard URL, from the getDashboardState read
+    // command (sanitized to scheme/host/port/path — no query, fragment or
+    // credentials). Used when the Dashboard URL setting is left empty, so
+    // the common case needs no configuration at all. Refreshed on every
+    // probe cycle: the panel can navigate between views, and the
+    // configured HA URL can change under us.
+    private volatile String discoveredDashboardUrl;
+
     public void start(PluginHost host, Map<String, Object> settings) {
         this.host = host;
         alive.set(true);
@@ -224,13 +232,47 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
             gatewayLatency.record(gatewayBurst);
         }
 
-        String dashboardUrl = str(settings.get("dashboardUrl"));
+        String dashboardUrl = effectiveDashboardUrl();
         if (!dashboardUrl.isEmpty()) {
             dashboardResult = simulation()
                 ? DashboardProbe.Result.success(45L, 200)
                 : DashboardProbe.probe(dashboardUrl);
         }
         reportStatus();
+        refreshDashboardUrl();
+    }
+
+    /** The configured **Dashboard URL** when set, otherwise whatever Kiosk
+     *  Satellite reports it's actually showing. The manual setting stays an
+     *  override rather than being removed: it's the only way to time a
+     *  different URL than the panel's own (a router, a second HA instance),
+     *  and the only fallback if discovery ever returns nothing. */
+    private String effectiveDashboardUrl() {
+        String configured = str(settings.get("dashboardUrl"));
+        if (!configured.isEmpty()) return configured;
+        String discovered = discoveredDashboardUrl;
+        return discovered == null ? "" : discovered;
+    }
+
+    /** Asks the host what dashboard it's currently showing — an SDK 1
+     *  read command added upstream in "Expose sanitized dashboard state to
+     *  SDK 1 plugins", resolving the feature request this plugin's README
+     *  used to link. Prefers the live `currentUrl` over the configured
+     *  `homeAssistantUrl`, so what's timed is what's actually on screen.
+     *  Simulation mode never calls out to the host. */
+    private void refreshDashboardUrl() {
+        if (simulation()) {
+            discoveredDashboardUrl = "https://homeassistant.example/lovelace/0";
+            return;
+        }
+        host.executeCommand("getDashboardState", Collections.emptyMap(), (ok, data, error) -> submit(() -> {
+            if (!ok || !(data instanceof Map)) return;
+            Map<?, ?> state = (Map<?, ?>) data;
+            String current = str(state.get("currentUrl"));
+            String configured = str(state.get("homeAssistantUrl"));
+            discoveredDashboardUrl = !current.isEmpty() ? current
+                : (!configured.isEmpty() ? configured : null);
+        }));
     }
 
     private PathBurst pingHost(String hostOrIp) {
@@ -294,15 +336,19 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         if (gatewayIp != null) parts.add(describeBurst("Gateway (" + gatewayIp + ")", gatewayBurst, gatewayLatency));
         String target = str(settings.get("pingTarget"));
         if (!target.isEmpty()) parts.add(describeBurst("Ping " + target, targetBurst, targetLatency));
-        String dashboardUrl = str(settings.get("dashboardUrl"));
+        String dashboardUrl = effectiveDashboardUrl();
         if (!dashboardUrl.isEmpty()) {
+            // Flag the auto-discovered case, so it's obvious the reading
+            // came from the panel's own dashboard rather than a URL someone
+            // typed into the setting.
+            String label = str(settings.get("dashboardUrl")).isEmpty() ? "Dashboard (auto)" : "Dashboard";
             DashboardProbe.Result d = dashboardResult;
             if (d == null) {
-                parts.add("Dashboard: pending");
+                parts.add(label + ": pending");
             } else if (!d.ok) {
-                parts.add("Dashboard: unreachable (" + d.error + ")");
+                parts.add(label + ": unreachable (" + d.error + ")");
             } else {
-                parts.add("Dashboard: " + d.elapsedMs + " ms (HTTP " + d.httpStatus + ")");
+                parts.add(label + ": " + d.elapsedMs + " ms (HTTP " + d.httpStatus + ")");
             }
         }
         host.status(String.join(" · ", parts), false);
@@ -347,7 +393,7 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
             target == null || target.received == 0 ? null : target.avgRttMs(),
             target == null || target.received == 0 ? null : target.lossPercent(),
             targetLatency.hasSamples() ? targetLatency.p95Ms() : null,
-            str(settings.get("dashboardUrl")), dashboard != null && dashboard.ok,
+            effectiveDashboardUrl(), dashboard != null && dashboard.ok,
             dashboard == null ? null : dashboard.elapsedMs,
             outagesLast24h());
 

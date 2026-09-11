@@ -3,7 +3,7 @@
   "apiVersion": 1,
   "id": "network-diagnostics",
   "name": "Network Diagnostics",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "minAndroidSdk": 24,
   "entryClass": "me.jxl.kiosk.plugins.networkdiagnostics.NetworkDiagnosticsPlugin",
   "description": "Connection type (WiFi/Ethernet), WiFi signal, network outage history, gateway/target ping (with latency history charts), and dashboard HTTP latency — as status text, Home Assistant sensor entities, and compact charts. Only the detailed WiFi SSID/BSSID/RSSI needs root — everything else needs none.",
@@ -38,7 +38,7 @@
       "key": "dashboardUrl",
       "type": "string",
       "title": "Dashboard URL",
-      "description": "HTTP(S) URL to time a plain response from, as a rough stand-in for dashboard responsiveness — this plugin has no way to discover Kiosk Satellite's own configured URL, so provide one yourself (your Home Assistant server's URL works well). Measures time to receive response headers only, not a real page load. Empty disables this check.",
+      "description": "HTTP(S) URL to time a plain response from, as a rough stand-in for dashboard responsiveness. Leave empty to use whatever dashboard the panel is actually showing, discovered automatically — set this only to time a different URL instead (a router, a second Home Assistant). Measures time to receive response headers only, not a real page load.",
       "default": "",
       "group": "Latency"
     },
