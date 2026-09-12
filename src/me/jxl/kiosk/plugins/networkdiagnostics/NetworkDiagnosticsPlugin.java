@@ -445,5 +445,9 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         worker.shutdownNow();
         worker.awaitTermination(1000, TimeUnit.MILLISECONDS);
         // KS revokes this plugin's host access before calling stop(), so no unsubscribe call here.
-    }
+            // Last, so anything above still has a shell to run in: ends
+        // the persistent root session rather than leaving a root
+        // shell alive for a plugin that is no longer running.
+        RootShell.shutdown();
+}
 }
