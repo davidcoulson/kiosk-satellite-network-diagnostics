@@ -41,7 +41,10 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
     private Map<String, Object> settings = new HashMap<>();
     private final IcmpEchoSource icmpSource = new IcmpEchoSource();
 
-    private volatile boolean rooted;
+    // True when either channel (root or Shizuku) is usable. The name
+    // predates Shizuku support; what callers care about is whether a
+    // privileged read can happen at all, not which channel serves it.
+    private volatile boolean privileged;
     private Boolean lastSimulation;
     private ScheduledFuture<?> probeTask;
 
@@ -79,6 +82,7 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
 
     public void start(PluginHost host, Map<String, Object> settings) {
         this.host = host;
+        PrivilegedShell.attach(host);
         alive.set(true);
         worker = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "network-diagnostics");
@@ -143,10 +147,11 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
     }
 
     private void detect() {
-        rooted = simulation() || RootShell.isRooted();
+        PrivilegedShell.detect();
+        privileged = simulation() || PrivilegedShell.available();
         detectRoute();
-        if (rooted && !simulation()) {
-            String out = RootShell.runOutput("dumpsys wifi 2>/dev/null", RootShell.DETECT_TIMEOUT_MS);
+        if (privileged && !simulation()) {
+            String out = PrivilegedShell.runOutput("dumpsys wifi 2>/dev/null", RootShell.DETECT_TIMEOUT_MS);
             wifi = NetworkMath.parseDumpsysWifi(out);
         } else if (simulation()) {
             wifi = new NetworkMath.WifiSnapshot("Simulated-WiFi", "aa:bb:cc:dd:ee:ff", -55);
@@ -162,7 +167,7 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
             localIp = "192.0.2.42";
             return;
         }
-        String out = RootShell.runOutput("ip route get 1.1.1.1 2>/dev/null", RootShell.DETECT_TIMEOUT_MS);
+        String out = PrivilegedShell.runOutput("ip route get 1.1.1.1 2>/dev/null", RootShell.DETECT_TIMEOUT_MS);
         NetworkMath.RouteInfo route = NetworkMath.parseIpRouteGet(out);
         connectionType = NetworkMath.classifyInterface(route.iface);
         gatewayIp = route.gatewayIp;
@@ -324,8 +329,13 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         }
         if (simulation()) {
             parts.add("Simulation mode");
-        } else if ("wifi".equals(connType) && !rooted) {
-            parts.add("WiFi signal needs root");
+        } else if ("wifi".equals(connType) && !privileged) {
+            parts.add("WiFi signal needs root or Shizuku");
+        } else if (PrivilegedShell.MODE_SHIZUKU.equals(PrivilegedShell.mode())) {
+            // Worth naming: on Shizuku this plugin works with no root at
+            // all, and if a reading is missing the channel is the first
+            // thing worth knowing.
+            parts.add("Reading via Shizuku" + (PrivilegedShell.shizukuIsRoot() ? " (root)" : " (shell)"));
         } else if ("wifi".equals(connType) && wifi != null && wifi.ssid != null) {
             String detail = wifi.ssid
                 + (wifi.bssid != null ? " (" + wifi.bssid + ")" : "")
@@ -448,6 +458,6 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
             // Last, so anything above still has a shell to run in: ends
         // the persistent root session rather than leaving a root
         // shell alive for a plugin that is no longer running.
-        RootShell.shutdown();
+        PrivilegedShell.detach();
 }
 }

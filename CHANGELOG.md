@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0
+
+- **Root is no longer required.** Both privileged reads work as Android's shell user, so a panel running Shizuku needs no root at all — verified on real hardware with root deliberately unused. This was the only plugin in the set whose every privileged command clears that bar, which is why it goes first: requiring root excludes most hardware people actually own.
+- Root is still preferred when present. The persistent session costs one grant for the plugin's lifetime and a write-and-read per command; every Shizuku call is a fresh binder round trip to a helper process. Shizuku is the fallback, not the replacement.
+- The status line names the active channel, and whether Shizuku is running as shell or root — if a reading is missing, that's the first thing worth knowing.
+- Shell syntax is unchanged. The host's Shizuku call takes an executable and arguments with no shell interpretation, but `/system/bin/sh -c <script>` is an ordinary executable, so pipes and redirection work the same on both channels. What differs is the permissions commands run with, never the syntax.
+
 ## 0.7.0
 
 - **One root shell per plugin instead of one per command.** Every root call used to spawn a fresh `su`, and Magisk shows its "granted Superuser rights" toast per request. The plugin now holds a single `su` session and writes commands to its stdin, so root is granted once per plugin start.
