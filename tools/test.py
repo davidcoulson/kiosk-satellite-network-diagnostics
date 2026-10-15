@@ -38,5 +38,7 @@ with tempfile.TemporaryDirectory(prefix='network-diagnostics-test-') as director
     subprocess.run([tool('java'), '-ea', '-cp', directory, 'NetworkEntitiesTest'], check=True)
     subprocess.run([tool('java'), '-ea', '-cp', directory, 'ManifestContractTest'], check=True)
     subprocess.run([tool('java'), '-ea', '-cp', directory, 'RootShellSessionTest'], check=True)
+    subprocess.run([tool('java'), '-ea', '-cp', directory, 'WifiHealthTest'], check=True)
+    subprocess.run([tool('java'), '-ea', '-cp', os.pathsep.join([directory, str(platform)]), 'ShizukuReconnectTest'], check=True)
 
 subprocess.run([sys.executable, str(root / 'tools/test_android_sdk.py')], check=True)

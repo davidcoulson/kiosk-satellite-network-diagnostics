@@ -58,11 +58,12 @@ public final class NetworkEntitiesTest {
             "", false, null,
             0);
         Map<String, Object> minimalIds = idMap(minimal, entityClass);
-        assertEquals(3, minimal.size(), "only network_up, connection_type and outages_24h remain");
+        assertEquals(4, minimal.size(), "WiFi identity remains alongside always-present entities");
         assertTrue(minimalIds.containsKey("binary_sensor.network_up"), "network_up always present");
         assertEquals(null, field(minimalIds.get("binary_sensor.network_up"), "state", entityClass), "unknown network state is null, not false");
         assertEquals("Ethernet", field(minimalIds.get("text_sensor.connection_type"), "state", entityClass), "ethernet friendly name");
-        assertTrue(!minimalIds.containsKey("sensor.wifi_rssi"), "no wifi_rssi when not on wifi");
+        assertTrue(minimalIds.containsKey("sensor.wifi_rssi"), "WiFi identity survives transport changes");
+        assertEquals(null, field(minimalIds.get("sensor.wifi_rssi"), "state", entityClass), "missing WiFi reading is unknown, never stale or zero");
         assertTrue(!minimalIds.containsKey("sensor.gateway_latency_ms"), "no gateway sensors with no gateway");
         assertTrue(!minimalIds.containsKey("sensor.target_latency_ms"), "no target sensors with an empty ping target");
         assertTrue(!minimalIds.containsKey("sensor.dashboard_response_ms"), "no dashboard sensor with an empty dashboard URL");
@@ -78,6 +79,8 @@ public final class NetworkEntitiesTest {
             "https://example.test", false, null,
             0);
         Map<String, Object> unreachableIds = idMap(unreachable, entityClass);
+        assertTrue(unreachableIds.containsKey("sensor.wifi_rssi"), "WiFi identity survives missing privileged reading");
+        assertEquals(null, field(unreachableIds.get("sensor.wifi_rssi"), "state", entityClass), "missing privileged reading is unknown");
         assertTrue(!unreachableIds.containsKey("sensor.gateway_latency_ms"), "no latency reading while every echo was lost");
         assertTrue(unreachableIds.containsKey("sensor.gateway_p95_ms"), "p95 history survives a currently-unreachable burst");
         assertTrue(!unreachableIds.containsKey("sensor.target_p95_ms"), "no p95 yet with no history at all");
