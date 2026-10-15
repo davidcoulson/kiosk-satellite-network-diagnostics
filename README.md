@@ -1,13 +1,13 @@
 # Network Diagnostics for Kiosk Satellite
 
-Connection type, WiFi signal, network outage history, and three latency readings: your configured target, the default gateway, and a dashboard URL's HTTP response time. Most of this plugin needs **no root at all** — only the detailed WiFi SSID/BSSID/RSSI reading does.
+Connection type, WiFi signal, network outage history, and three latency readings: your configured target, the default gateway, and a dashboard URL's HTTP response time. Most of this plugin needs **no root at all** — SSID/BSSID detail uses root or Shizuku. RSSI can also use Kiosk Satellite's local health endpoint.
 
 Every applicable reading is published both as plugin-subpage status text and as a real Home Assistant sensor/text-sensor/binary-sensor entity — SDK 1 added entity types beyond RGB lights in jxlarrea/kiosk-satellite's "Add SDK 1 plugin sensors, selects and bar charts", resolving [the upstream feature request](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world/issues/2) this plugin used to be blocked on. See "Home Assistant entities" below for exactly what's exposed and when.
 
 ## Requirements
 
 - Kiosk Satellite with **plugin SDK 1 support**.
-- Root (e.g. Magisk) for WiFi SSID/BSSID/RSSI only. Everything else — connection type, outage tracking, gateway ping, target ping, dashboard latency — works without root.
+- Root or Shizuku for SSID/BSSID detail; RSSI also has a local-health fallback. Everything else — connection type, outage tracking, gateway ping, target ping, dashboard latency — works without root.
 
 ## Install and use
 
@@ -26,20 +26,20 @@ The plugin declares two actions — **Ping now** (an immediate probe cycle outsi
 | Local IP address | The same `ip route get` call's `src` field | No |
 | Network up/down | Subscribes to Kiosk Satellite's own `device.network` event | No |
 | Outage history | Counts recovered outages in the last 24h from that same event, with a 10-second merge window so a flapping connection isn't counted as dozens of separate outages | No |
-| WiFi SSID, BSSID, signal (RSSI) | `dumpsys wifi`, parsed for the connected network | Yes |
+| WiFi SSID, BSSID, signal (RSSI) | Current Android status via root/Shizuku; optional loopback health fallback for RSSI | Root or Shizuku for detailed WiFi data; neither for health RSSI |
 | Gateway latency + loss, rolling p95, 5-min miss count | An unprivileged ICMP echo (ping) socket to the default gateway found via `ip route get` | No |
 | Target latency + loss, rolling p95, 5-min miss count | The same ICMP mechanism, against your configured **Ping target** | No |
 | Dashboard responsiveness | A plain HTTP GET to the dashboard the panel is showing (discovered automatically) or your configured **Dashboard URL**, timed to first response headers | No |
 
 ## Home Assistant entities
 
-Every reading above publishes as an entity the moment it's applicable, and is removed the moment it stops being applicable (e.g. clearing the **Ping target** setting removes the target's latency/loss/p95 entities rather than leaving them stuck on a stale value):
+WiFi signal keeps a stable entity identity, including while readings or permissions are temporarily unavailable. Other readings publish as entities when applicable and are removed when no longer applicable (e.g. clearing the **Ping target** setting removes the target's latency/loss/p95 entities rather than leaving them stuck on a stale value):
 
 | Entity | Type | When it exists |
 | --- | --- | --- |
 | Network up | binary_sensor (`connectivity`) | Always |
 | Connection type | text_sensor | Always |
-| WiFi signal | sensor (dBm) | On WiFi, rooted |
+| WiFi signal | sensor (dBm) | Always registered; unknown when no current WiFi reading is available |
 | WiFi SSID | sensor (text) | On WiFi, rooted |
 | Gateway latency, packet loss | sensor (ms, %) | A gateway is known and at least one recent echo came back |
 | Gateway p95 latency | sensor (ms) | Once the gateway has rolling history |
@@ -60,7 +60,7 @@ Linux grants unprivileged ICMP datagram sockets to any GID inside `net.ipv4.ping
 
 ## Why WiFi signal is different
 
-Reading the currently-connected SSID and signal strength normally goes through `ConnectivityManager`/`WifiManager`, which need a live Android `Context` — a value this plugin has no way to obtain (`KioskPlugin.start` hands it a `PluginHost`, not a `Context`, and the SDK exposes no equivalent). `dumpsys wifi` is the fallback: reachable only as root (a plain app calling `dumpsys` is refused with a permission denial), but it needs no cooperation from Kiosk Satellite itself and works the same way regardless of Android version or OEM `dumpsys` formatting quirks the regex parsing tolerates. SSID, BSSID and RSSI are all parsed from the same `dumpsys` line atomically, verified against a real 14,000-line capture from a physical panel — pulling them from separate matches risked a BSSID from one saved-network row getting attributed to an unrelated SSID from another.
+The plugin has no Android Context. It reads SSID/BSSID and RSSI through root or Shizuku using compact current status rather than a full historical dump. A bounded request to Kiosk Satellite's default loopback health endpoint can supply current RSSI without either privilege channel; it does not supply SSID/BSSID. See WiFi refresh and transient failures below for limitations.
 
 ## Connection type and gateway need no root at all
 
@@ -98,3 +98,11 @@ python3 tools/build.py
 Apache-2.0. The plugin ID is `network-diagnostics`. See [jxlarrea/kiosk-satellite-plugin-hello-world](https://github.com/jxlarrea/kiosk-satellite-plugin-hello-world) for the SDK 1 documentation this plugin was built against.
 
 Author: David Coulson. Built with AI assistance (Claude Code).
+
+## WiFi refresh and transient failures
+
+Each probe cycle refreshes the privilege channel, route, and WiFi reading. This allows Shizuku to become available after the plugin starts or recover after reconnecting, without restarting the plugin.
+
+The WiFi read first uses compact `cmd wifi status`, with a filtered current `mWifiInfo` line from `dumpsys wifi` as a fallback. This avoids sending the entire historical WiFi dump through a bounded command-output channel. For RSSI, the plugin also checks Kiosk Satellite's read-only `http://127.0.0.1:2324/api/health` endpoint and uses a valid current `link.rssi` on WiFi. That fallback is optional: it requires Remote Admin on its default port; disabled, authenticated, custom-port, or incompatible endpoints leave the direct Android-command result in use. No remote credentials or configuration are changed.
+
+A temporary missing reading publishes unknown under the same WiFi sensor identity. It does not remove the entity, zero the signal, or reuse a previous sample. This prevents Home Assistant Recorder statistics becoming orphaned merely because an RSSI read failed.

@@ -60,10 +60,11 @@ final class NetworkEntities {
             entities.add(new Entity("text_sensor", "connection_type", "Connection type", Collections.emptyMap(), friendly));
         }
 
+        // Keep the identity stable when privilege, transport or a sample is
+        // temporarily unavailable. Removing it orphans Recorder statistics.
+        entities.add(new Entity("sensor", "wifi_rssi", "WiFi signal", signalMetadata(),
+            "wifi".equals(connectionType) && wifiRssiDbm != null ? wifiRssiDbm.doubleValue() : null));
         if ("wifi".equals(connectionType)) {
-            if (wifiRssiDbm != null) {
-                entities.add(new Entity("sensor", "wifi_rssi", "WiFi signal", signalMetadata(), wifiRssiDbm.doubleValue()));
-            }
             if (wifiSsid != null) {
                 entities.add(new Entity("text_sensor", "wifi_ssid", "WiFi SSID", Collections.emptyMap(), wifiSsid));
             }

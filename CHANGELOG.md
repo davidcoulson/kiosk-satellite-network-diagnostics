@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Refresh WiFi and privileged-channel detection on every probe cycle, including Shizuku reconnection.
+- Keep the WiFi signal entity registered through missing readings to preserve Home Assistant statistic ownership.
+- Read compact current Android WiFi status, with filtered dumpsys and optional local-health RSSI fallback.
+- Add regression tests for reconnecting, signal parsing, and missing WiFi samples.
+
 ## 0.8.0
 
 - **Root is no longer required.** Both privileged reads work as Android's shell user, so a panel running Shizuku needs no root at all — verified on real hardware with root deliberately unused. This was the only plugin in the set whose every privileged command clears that bar, which is why it goes first: requiring root excludes most hardware people actually own.
