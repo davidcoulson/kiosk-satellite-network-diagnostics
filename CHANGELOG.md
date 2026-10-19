@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Plugin 0.8.2: the package build now includes `assets/`, so the icon added in 0.8.1 is in the ZIP (it was missing, which hid the plugin from Community Plugins).
+
 - Plugin 0.8.1: adds an icon for Community Plugins and Browse plugins.
 
 ## 0.8.0
