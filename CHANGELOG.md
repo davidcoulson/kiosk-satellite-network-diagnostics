@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Plugin 0.8.1: adds an icon for Community Plugins and Browse plugins.
+
 ## 0.8.0
 
 - **Root is no longer required.** Both privileged reads work as Android's shell user, so a panel running Shizuku needs no root at all — verified on real hardware with root deliberately unused. This was the only plugin in the set whose every privileged command clears that bar, which is why it goes first: requiring root excludes most hardware people actually own.
