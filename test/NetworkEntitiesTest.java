@@ -14,7 +14,7 @@ public final class NetworkEntitiesTest {
         Class<?> entityClass = Class.forName("me.jxl.kiosk.plugins.networkdiagnostics.NetworkEntities$Entity");
         Method compute = entities.getDeclaredMethod("compute",
             Boolean.class, String.class,
-            String.class, Integer.class,
+            String.class, Integer.class, boolean.class,
             String.class, Double.class, Double.class, Double.class,
             String.class, Double.class, Double.class, Double.class,
             String.class, boolean.class, Long.class,
@@ -26,7 +26,7 @@ public final class NetworkEntitiesTest {
         @SuppressWarnings("unchecked")
         List<Object> full = (List<Object>) compute.invoke(null,
             true, "wifi",
-            "MyNetwork", -55,
+            "MyNetwork", -55, true,
             "192.0.2.1", 12.0, 0.0, 14.0,
             "192.0.2.50", 20.0, 5.0, 22.0,
             "https://example.test", true, 45L,
@@ -52,28 +52,41 @@ public final class NetworkEntitiesTest {
         @SuppressWarnings("unchecked")
         List<Object> minimal = (List<Object>) compute.invoke(null,
             (Object) null, "ethernet",
-            null, null,
+            null, null, false,
             null, null, null, null,
             "", null, null, null,
             "", false, null,
             0);
         Map<String, Object> minimalIds = idMap(minimal, entityClass);
-        assertEquals(4, minimal.size(), "WiFi identity remains alongside always-present entities");
+        assertEquals(3, minimal.size(), "only network_up, connection_type and outages_24h remain");
         assertTrue(minimalIds.containsKey("binary_sensor.network_up"), "network_up always present");
         assertEquals(null, field(minimalIds.get("binary_sensor.network_up"), "state", entityClass), "unknown network state is null, not false");
         assertEquals("Ethernet", field(minimalIds.get("text_sensor.connection_type"), "state", entityClass), "ethernet friendly name");
-        assertTrue(minimalIds.containsKey("sensor.wifi_rssi"), "WiFi identity survives transport changes");
-        assertEquals(null, field(minimalIds.get("sensor.wifi_rssi"), "state", entityClass), "missing WiFi reading is unknown, never stale or zero");
+        assertTrue(!minimalIds.containsKey("sensor.wifi_rssi"), "no wifi_rssi on a panel that has never been on WiFi");
         assertTrue(!minimalIds.containsKey("sensor.gateway_latency_ms"), "no gateway sensors with no gateway");
         assertTrue(!minimalIds.containsKey("sensor.target_latency_ms"), "no target sensors with an empty ping target");
         assertTrue(!minimalIds.containsKey("sensor.dashboard_response_ms"), "no dashboard sensor with an empty dashboard URL");
+
+        // The same Ethernet reading on a panel that has been on WiFi keeps the
+        // signal entity, unknown, so its Recorder statistics survive.
+        @SuppressWarnings("unchecked")
+        List<Object> afterWifi = (List<Object>) compute.invoke(null,
+            (Object) null, "ethernet",
+            null, null, true,
+            null, null, null, null,
+            "", null, null, null,
+            "", false, null,
+            0);
+        Map<String, Object> afterWifiIds = idMap(afterWifi, entityClass);
+        assertTrue(afterWifiIds.containsKey("sensor.wifi_rssi"), "WiFi identity survives a switch to Ethernet");
+        assertEquals(null, field(afterWifiIds.get("sensor.wifi_rssi"), "state", entityClass), "missing WiFi reading is unknown, never stale or zero");
 
         // A gateway/target configured but currently unreachable: burst avg
         // is null (all echoes lost), but p95/miss history can still exist.
         @SuppressWarnings("unchecked")
         List<Object> unreachable = (List<Object>) compute.invoke(null,
             false, "wifi",
-            null, null,
+            null, null, true,
             "192.0.2.1", null, null, 14.0,
             "192.0.2.50", null, null, null,
             "https://example.test", false, null,

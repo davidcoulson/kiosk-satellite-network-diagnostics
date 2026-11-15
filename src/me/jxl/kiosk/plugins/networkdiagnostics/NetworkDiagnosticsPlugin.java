@@ -54,6 +54,11 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
     private volatile String gatewayIp;
     private volatile String localIp;
     private volatile NetworkMath.WifiSnapshot wifi;
+    private boolean wifiSeen; // sticky: register the WiFi signal entity only once the panel has been on WiFi
+    private int probeCycles;
+    // Full privileged re-detect (channel probe + WiFi read, which can fall back
+    // to dumpsys) every this many probe cycles once both are known.
+    private static final int FULL_DETECT_EVERY = 5;
     private volatile PathBurst targetBurst;
     private volatile PathBurst gatewayBurst;
     private volatile DashboardProbe.Result dashboardResult;
@@ -171,7 +176,7 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         java.net.HttpURLConnection c = null;
         try {
             c = (java.net.HttpURLConnection) new java.net.URL("http://127.0.0.1:2324/api/health").openConnection();
-            c.setConnectTimeout(2000); c.setReadTimeout(2000);
+            c.setConnectTimeout(300); c.setReadTimeout(500); // loopback: a closed port must not stall the cycle
             if (c.getResponseCode() != 200) return;
             java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
             try (java.io.InputStream in = c.getInputStream()) {
@@ -259,9 +264,16 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
     }
 
     private void runProbeCycle() {
-        // Shizuku may start after KS or reconnect without a network event.
-        // Refresh the channel and route before probing; keep existing history.
-        detect();
+        // Shizuku may start after KS or reconnect without a network event, so
+        // re-detect while privilege or the WiFi reading is missing, and every
+        // few cycles otherwise; the route and health RSSI are cheap, so every cycle.
+        boolean wifiMissing = "wifi".equals(connectionType) && (wifi == null || wifi.rssiDbm == null);
+        if (!privileged || wifiMissing || ++probeCycles % FULL_DETECT_EVERY == 0) {
+            detect();
+        } else {
+            detectRoute();
+            if (!simulation()) refreshNetworkLink();
+        }
         String target = str(settings.get("pingTarget"));
         if (!target.isEmpty()) {
             targetBurst = pingHost(target);
@@ -432,6 +444,7 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         List<NetworkEntities.Entity> desired = NetworkEntities.compute(
             networkUp, connectionType,
             w == null ? null : w.ssid, w == null ? null : w.rssiDbm,
+            wifiSeen |= "wifi".equals(connectionType),
             gatewayIp,
             gateway == null || gateway.received == 0 ? null : gateway.avgRttMs(),
             gateway == null || gateway.received == 0 ? null : gateway.lossPercent(),

@@ -33,13 +33,13 @@ The plugin declares two actions — **Ping now** (an immediate probe cycle outsi
 
 ## Home Assistant entities
 
-WiFi signal keeps a stable entity identity, including while readings or permissions are temporarily unavailable. Other readings publish as entities when applicable and are removed when no longer applicable (e.g. clearing the **Ping target** setting removes the target's latency/loss/p95 entities rather than leaving them stuck on a stale value):
+Once the panel has been on WiFi, WiFi signal keeps a stable entity identity, including while readings or permissions are temporarily unavailable. Other readings publish as entities when applicable and are removed when no longer applicable (e.g. clearing the **Ping target** setting removes the target's latency/loss/p95 entities rather than leaving them stuck on a stale value):
 
 | Entity | Type | When it exists |
 | --- | --- | --- |
 | Network up | binary_sensor (`connectivity`) | Always |
 | Connection type | text_sensor | Always |
-| WiFi signal | sensor (dBm) | Always registered; unknown when no current WiFi reading is available |
+| WiFi signal | sensor (dBm) | Once the panel has been on WiFi; unknown when no current WiFi reading is available |
 | WiFi SSID | sensor (text) | On WiFi, rooted |
 | Gateway latency, packet loss | sensor (ms, %) | A gateway is known and at least one recent echo came back |
 | Gateway p95 latency | sensor (ms) | Once the gateway has rolling history |
@@ -101,7 +101,7 @@ Author: David Coulson. Built with AI assistance (Claude Code).
 
 ## WiFi refresh and transient failures
 
-Each probe cycle refreshes the privilege channel, route, and WiFi reading. This allows Shizuku to become available after the plugin starts or recover after reconnecting, without restarting the plugin.
+Each probe cycle refreshes the route and, where Remote Admin is available, the health RSSI. The privilege channel and the WiFi command reading are re-read while either is missing and every fifth cycle otherwise. This allows Shizuku to become available after the plugin starts or recover after reconnecting, without restarting the plugin.
 
 The WiFi read first uses compact `cmd wifi status`, with a filtered current `mWifiInfo` line from `dumpsys wifi` as a fallback. This avoids sending the entire historical WiFi dump through a bounded command-output channel. For RSSI, the plugin also checks Kiosk Satellite's read-only `http://127.0.0.1:2324/api/health` endpoint and uses a valid current `link.rssi` on WiFi. That fallback is optional: it requires Remote Admin on its default port; disabled, authenticated, custom-port, or incompatible endpoints leave the direct Android-command result in use. No remote credentials or configuration are changed.
 

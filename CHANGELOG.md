@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Refresh WiFi and privileged-channel detection on every probe cycle, including Shizuku reconnection.
+- Pick up Shizuku after startup or a reconnect: re-detect the privileged channel and WiFi reading while either is missing, and every fifth probe cycle otherwise.
+- Keep the WiFi signal entity off Ethernet-only panels; it is registered once the panel has been on WiFi.
+- Shorten the loopback health-endpoint timeouts so a closed port can't stall a probe cycle.
 - Keep the WiFi signal entity registered through missing readings to preserve Home Assistant statistic ownership.
 - Read compact current Android WiFi status, with filtered dumpsys and optional local-health RSSI fallback.
 - Add regression tests for reconnecting, signal parsing, and missing WiFi samples.
