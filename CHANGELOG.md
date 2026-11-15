@@ -9,6 +9,10 @@
 - Read compact current Android WiFi status, with filtered dumpsys and optional local-health RSSI fallback.
 - Add regression tests for reconnecting, signal parsing, and missing WiFi samples.
 
+- Plugin 0.8.2: the package build now includes `assets/`, so the icon added in 0.8.1 is in the ZIP (it was missing, which hid the plugin from Community Plugins).
+
+- Plugin 0.8.1: adds an icon for Community Plugins and Browse plugins.
+
 ## 0.8.0
 
 - **Root is no longer required.** Both privileged reads work as Android's shell user, so a panel running Shizuku needs no root at all — verified on real hardware with root deliberately unused. This was the only plugin in the set whose every privileged command clears that bar, which is why it goes first: requiring root excludes most hardware people actually own.
