@@ -54,6 +54,11 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
     private volatile String gatewayIp;
     private volatile String localIp;
     private volatile NetworkMath.WifiSnapshot wifi;
+    private boolean wifiSeen; // sticky: register the WiFi signal entity only once the panel has been on WiFi
+    private int probeCycles;
+    // Full privileged re-detect (channel probe + WiFi read, which can fall back
+    // to dumpsys) every this many probe cycles once both are known.
+    private static final int FULL_DETECT_EVERY = 5;
     private volatile PathBurst targetBurst;
     private volatile PathBurst gatewayBurst;
     private volatile DashboardProbe.Result dashboardResult;
@@ -151,13 +156,47 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         privileged = simulation() || PrivilegedShell.available();
         detectRoute();
         if (privileged && !simulation()) {
-            String out = PrivilegedShell.runOutput("dumpsys wifi 2>/dev/null", RootShell.DETECT_TIMEOUT_MS);
+            // Read current status before the bounded Shizuku capture. A full
+            // dumpsys contains historical scans and can exceed its output cap.
+            String out = PrivilegedShell.runOutput("cmd wifi status 2>/dev/null", RootShell.DETECT_TIMEOUT_MS);
+            if (NetworkMath.parseDumpsysWifi(out).rssiDbm == null) {
+                out = PrivilegedShell.runOutput("dumpsys wifi 2>/dev/null | grep -E '^[[:space:]]*mWifiInfo[ :]'", RootShell.DETECT_TIMEOUT_MS);
+            }
             wifi = NetworkMath.parseDumpsysWifi(out);
         } else if (simulation()) {
             wifi = new NetworkMath.WifiSnapshot("Simulated-WiFi", "aa:bb:cc:dd:ee:ff", -55);
+        } else {
+            wifi = null;
         }
+        if (!simulation()) refreshNetworkLink();
     }
 
+    /** The host's read-only local health endpoint exposes Android RSSI. */
+    private void refreshNetworkLink() {
+        java.net.HttpURLConnection c = null;
+        try {
+            c = (java.net.HttpURLConnection) new java.net.URL("http://127.0.0.1:2324/api/health").openConnection();
+            c.setConnectTimeout(300); c.setReadTimeout(500); // loopback: a closed port must not stall the cycle
+            if (c.getResponseCode() != 200) return;
+            java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
+            try (java.io.InputStream in = c.getInputStream()) {
+                byte[] buf = new byte[1024]; int n;
+                while ((n = in.read(buf)) != -1) {
+                    if (body.size() + n > 32768) return;
+                    body.write(buf, 0, n);
+                }
+            }
+            String json = body.toString("UTF-8");
+            Integer signal = NetworkMath.parseHealthRssi(json);
+            if (signal == null) return;
+            connectionType = "wifi";
+            NetworkMath.WifiSnapshot previous = wifi;
+            wifi = new NetworkMath.WifiSnapshot(previous == null ? null : previous.ssid,
+                previous == null ? null : previous.bssid, signal);
+        } catch (Exception ignored) {
+            // Preserve the direct Android-command fallback if health is disabled.
+        } finally { if (c != null) c.disconnect(); }
+    }
     /** Connection type and default gateway — root-free (confirmed on real
      *  hardware: an unprivileged shell can run `ip route get`). */
     private void detectRoute() {
@@ -225,6 +264,16 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
     }
 
     private void runProbeCycle() {
+        // Shizuku may start after KS or reconnect without a network event, so
+        // re-detect while privilege or the WiFi reading is missing, and every
+        // few cycles otherwise; the route and health RSSI are cheap, so every cycle.
+        boolean wifiMissing = "wifi".equals(connectionType) && (wifi == null || wifi.rssiDbm == null);
+        if (!privileged || wifiMissing || ++probeCycles % FULL_DETECT_EVERY == 0) {
+            detect();
+        } else {
+            detectRoute();
+            if (!simulation()) refreshNetworkLink();
+        }
         String target = str(settings.get("pingTarget"));
         if (!target.isEmpty()) {
             targetBurst = pingHost(target);
@@ -395,6 +444,7 @@ public final class NetworkDiagnosticsPlugin implements KioskPlugin {
         List<NetworkEntities.Entity> desired = NetworkEntities.compute(
             networkUp, connectionType,
             w == null ? null : w.ssid, w == null ? null : w.rssiDbm,
+            wifiSeen |= "wifi".equals(connectionType),
             gatewayIp,
             gateway == null || gateway.received == 0 ? null : gateway.avgRttMs(),
             gateway == null || gateway.received == 0 ? null : gateway.lossPercent(),

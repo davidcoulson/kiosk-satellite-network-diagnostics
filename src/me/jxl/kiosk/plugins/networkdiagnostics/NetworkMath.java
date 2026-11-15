@@ -98,6 +98,17 @@ final class NetworkMath {
         return new WifiSnapshot(normalizedSsid(connectedSsid != null ? connectedSsid : wifiInfoSsid), null, rssi);
     }
 
+    /** RSSI from KS's flat local health link object, never another field. */
+    static Integer parseHealthRssi(String json) {
+        if (json == null) return null;
+        Matcher link = Pattern.compile("\"link\"\\s*:\\s*\\{([^}]*)\\}").matcher(json);
+        if (!link.find()) return null;
+        String fields = link.group(1);
+        if (!Pattern.compile("\"type\"\\s*:\\s*\"wifi\"").matcher(fields).find()) return null;
+        Matcher signal = Pattern.compile("\"rssi\"\\s*:\\s*(-?\\d+)(?=\\s*(?:,|$))").matcher(fields);
+        return signal.find() ? parseRssi(signal.group(1)) : null;
+    }
+
     private static Integer parseRssi(String rawRssi) {
         if (rawRssi == null) return null;
         try {

@@ -46,7 +46,7 @@ final class NetworkEntities {
 
     static List<Entity> compute(
         Boolean networkUp, String connectionType,
-        String wifiSsid, Integer wifiRssiDbm,
+        String wifiSsid, Integer wifiRssiDbm, boolean wifiSeen,
         String gatewayIp, Double gatewayAvgRttMs, Double gatewayLossPercent, Double gatewayP95Ms,
         String pingTarget, Double targetAvgRttMs, Double targetLossPercent, Double targetP95Ms,
         String dashboardUrl, boolean dashboardOk, Long dashboardElapsedMs,
@@ -60,10 +60,12 @@ final class NetworkEntities {
             entities.add(new Entity("text_sensor", "connection_type", "Connection type", Collections.emptyMap(), friendly));
         }
 
+        // Once the panel has been on WiFi, keep the identity stable when privilege,
+        // transport or a sample is temporarily unavailable: removing it orphans
+        // Recorder statistics. An Ethernet-only panel never gets it.
+        if (wifiSeen) entities.add(new Entity("sensor", "wifi_rssi", "WiFi signal", signalMetadata(),
+            "wifi".equals(connectionType) && wifiRssiDbm != null ? wifiRssiDbm.doubleValue() : null));
         if ("wifi".equals(connectionType)) {
-            if (wifiRssiDbm != null) {
-                entities.add(new Entity("sensor", "wifi_rssi", "WiFi signal", signalMetadata(), wifiRssiDbm.doubleValue()));
-            }
             if (wifiSsid != null) {
                 entities.add(new Entity("text_sensor", "wifi_ssid", "WiFi SSID", Collections.emptyMap(), wifiSsid));
             }
